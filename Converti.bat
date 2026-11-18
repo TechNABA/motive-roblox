@@ -20,12 +20,12 @@ if not "%BRANCH%"=="master" (
 )
 
 echo Aggiorno la cartella da GitHub...
-git fetch --quiet origin
+git fetch --quiet origin 2>nul
 if errorlevel 1 (
     echo Non riesco a collegarmi a GitHub: controlla la connessione e riprova.
     goto fine
 )
-git rebase --quiet origin/master
+git rebase --quiet --autostash origin/master >nul 2>&1
 if errorlevel 1 (
     git rebase --abort >nul 2>&1
     echo.
@@ -61,7 +61,7 @@ if "%AHEAD%"=="0" (
     echo Nessuna take nuova o cambiata: niente da pubblicare.
     goto fine
 )
-git push --quiet origin master
+git push --quiet origin master 2>nul
 if errorlevel 1 (
     echo.
     echo Pubblicazione NON riuscita: controlla la connessione e l'accesso a GitHub.
