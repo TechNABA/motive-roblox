@@ -64,7 +64,9 @@ Il file del plugin per Studio e' nella [release](https://github.com/TechNABA/mot
 
 1. Apri Studio, trascina `MotiveAnimazioni.rbxmx` nella finestra: compare lo script `AnimazioniMotive`.
 2. Click destro sullo script > **Publish as Plugin**. Nome "Animazioni Motive", distribuzione pubblica e gratuita.
-3. Copia il link della pagina del plugin nella guida studenti (`GUIDA-STUDENTI.md`, punto 1).
+3. Nelle impostazioni dell'asset (Creator Dashboard) attiva la distribuzione gratuita sul Creator Store e copia il link
+   della pagina del plugin nella guida studenti (`GUIDA-STUDENTI.md`, punto 1). Pubblicato: [Motive Animation
+   Converter](https://create.roblox.com/store/asset/91142360787208/Motive-Animation-Converter).
 
 Da quel momento gli studenti lo installano con un clic e Studio lo aggiorna da solo quando ripubblichi.
 

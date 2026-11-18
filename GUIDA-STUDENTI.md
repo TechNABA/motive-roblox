@@ -2,7 +2,9 @@
 
 ## 1. Installa il plugin (una volta sola)
 
-Apri questo link e clicca **Get** (o **Ottieni**): **LINK DEL PLUGIN (lo aggiunge il docente)**
+Apri questo link e clicca **Get** (o **Ottieni**), poi **Install**:
+<https://create.roblox.com/store/asset/91142360787208/Motive-Animation-Converter>
+(sul Creator Store il plugin si chiama **Motive Animation Converter**)
 
 Poi apri Roblox Studio: a destra compare il pannello **Animazioni Motive**.
 
