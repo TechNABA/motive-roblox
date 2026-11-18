@@ -32,10 +32,12 @@ Ogni volta:
 1. In Motive esporta le take come **FBX binario** dello scheletro, con **Y up** (le impostazioni usate finora).
 2. Copia gli FBX nella cartella `export_motive` del repository. Gli FBX non vengono pubblicati (sono esclusi da Git).
 3. Doppio clic su **`Converti.bat`**: converte, controlla e pubblica. Le take con problemi vengono elencate con il
-   motivo e non vengono pubblicate; le altre si'.
+   motivo, restano in `export_motive` e non vengono pubblicate; le altre si', e i loro FBX passano in
+   `export_motive\convertiti`.
 4. Gli studenti vedono le take nuove nel plugin con **Aggiorna elenco** (GitHub puo' metterci qualche minuto).
 
-Per togliere una take: cancella il suo `.json` da `animazioni/`, poi doppio clic su `Converti.bat`.
+Per **togliere** una take: cancella il suo `.json` da `animazioni/`, poi doppio clic su `Converti.bat`.
+Per **riconvertire** una take: riporta il suo FBX da `export_motive\convertiti` a `export_motive`, poi `Converti.bat`.
 
 ### Cosa controlla il convertitore
 

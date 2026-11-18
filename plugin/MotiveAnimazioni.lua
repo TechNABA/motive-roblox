@@ -177,8 +177,12 @@ local function readTake(data)
 	for _, p in PARTS do
 		if not index[p] then fail("Il file dell'animazione e' danneggiato: riscaricalo.") end
 	end
+	local fps = data.fps
+	if type(fps) ~= "number" or fps < 1 or fps > 1000 then
+		fail("Il file dell'animazione e' danneggiato: riscaricalo.")
+	end
 	local np = #parts
-	return n, (data.fps or 30), function(f: number)
+	return n, fps, function(f: number)
 		local canon = {}
 		for _, p in PARTS do
 			local b = ((f - 1) * np + index[p] - 1) * 4
@@ -225,8 +229,8 @@ local function animSavesFolder(rig: Model): Instance
 	return holder
 end
 
--- Adapt a decoded take to the avatar and save it for the Animation Editor. Returns the saved KeyframeSequence.
-local function applyTake(rig: Model, data, name: string, progress: ((number) -> ())?): KeyframeSequence
+-- Adapt a decoded take to the avatar. Yields; touches nothing in the place.
+local function buildTake(rig: Model, data, progress: ((number) -> ())?): KeyframeSequence
 	local info = describeRig(rig)
 	local n, fps, frame = readTake(data)
 	local ks = Instance.new("KeyframeSequence")
@@ -239,6 +243,14 @@ local function applyTake(rig: Model, data, name: string, progress: ((number) -> 
 			task.wait()
 		end
 	end
+	return ks
+end
+
+-- Save an adapted take where the Animation Editor finds it. Does not yield.
+local function saveTake(rig: Model, ks: KeyframeSequence, name: string): KeyframeSequence
+	if not rig:IsDescendantOf(workspace) then
+		fail("L'avatar e' stato tolto dalla scena mentre preparavo l'animazione: riprova.")
+	end
 	local folder = animSavesFolder(rig)
 	-- never overwrite: a saved animation may hold a student's edits
 	local final, k = name, 1
@@ -249,6 +261,10 @@ local function applyTake(rig: Model, data, name: string, progress: ((number) -> 
 	ks.Name = final
 	ks.Parent = folder
 	return ks
+end
+
+local function applyTake(rig: Model, data, name: string, progress: ((number) -> ())?): KeyframeSequence
+	return saveTake(rig, buildTake(rig, data, progress), name)
 end
 
 local function isRig(inst: Instance): boolean
@@ -293,7 +309,7 @@ local function httpGetJson(url: string)
 end
 
 local Motive = {
-	VERSION = VERSION, describeRig = describeRig, readTake = readTake, applyTake = applyTake,
+	VERSION = VERSION, describeRig = describeRig, readTake = readTake, buildTake = buildTake, saveTake = saveTake, applyTake = applyTake,
 	animSavesFolder = animSavesFolder, pickRig = pickRig,
 }
 
@@ -424,10 +440,12 @@ local function useTake(entry)
 			data = httpGetJson(BASE_URL .. HttpService:UrlEncode(entry.file))
 			cache[entry.file] = data
 		end
-		local recording = ChangeHistoryService:TryBeginRecording("Animazione Motive")
-		local ok, res = pcall(applyTake, rig, data, entry.name, function(p)
+		local ks = buildTake(rig, data, function(p)
 			say(string.format("Adatto '%s' all'avatar... %d%%", entry.name, math.floor(p * 100)))
 		end)
+		-- the recording only wraps the instant save, so the student's own edits meanwhile stay separate
+		local recording = ChangeHistoryService:TryBeginRecording("Animazione Motive")
+		local ok, res = pcall(saveTake, rig, ks, entry.name)
 		if recording then
 			ChangeHistoryService:FinishRecording(recording, ok and Enum.FinishRecordingOperation.Commit or Enum.FinishRecordingOperation.Cancel)
 		end
@@ -441,6 +459,7 @@ end
 local function loadList()
 	run(function()
 		say("Carico l'elenco delle animazioni...")
+		table.clear(cache) -- a take republished under the same name must be downloaded again
 		local index = httpGetJson(BASE_URL .. "index.json")
 		if type(index) ~= "table" or type(index.takes) ~= "table" then
 			fail("L'elenco delle animazioni e' danneggiato: avvisa il docente.")

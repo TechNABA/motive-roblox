@@ -125,6 +125,15 @@ class EndToEndTests(unittest.TestCase):
                 index = json.load(f)
             self.assertEqual([t["file"] for t in index["takes"]], ["My_Take.json"])
             self.assertEqual(index["takes"][0]["name"], "My Take")
+            # converted FBX leave the inbox, broken ones stay
+            self.assertEqual(sorted(os.listdir(src)), ["broken.fbx", "convertiti"])
+            self.assertEqual(os.listdir(os.path.join(src, "convertiti")), ["My Take.fbx"])
+            # removing a take: delete its json, run again with nothing new -> index updated
+            os.remove(os.path.join(src, "broken.fbx"))
+            os.remove(os.path.join(out, "My_Take.json"))
+            self.assertEqual(cli.main([src, out]), 0)
+            with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
+                self.assertEqual(json.load(f)["takes"], [])
 
 
 if __name__ == "__main__":
