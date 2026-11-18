@@ -1,4 +1,5 @@
-"""Build the plugin file for the release: build/MotiveAnimazioni.rbxmx, a Script holding plugin/MotiveAnimazioni.lua.
+"""Build the plugin file for the release: build/MotiveAnimazioni.rbxmx, a Script holding plugin/MotiveAnimazioni.lua
+(and build/MotiveAnimazioni_modulo.rbxmx, the same code as a ModuleScript, for tests/plugin_test.luau).
 
 Dragged into Studio, the Script can be saved with "Save as Local Plugin" or published with "Publish as Plugin".
 Usage: python tools/build_plugin.py
@@ -25,6 +26,13 @@ def main():
     path = os.path.join(out_dir, "MotiveAnimazioni.rbxmx")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(xml)
+    # same code as a ModuleScript, for tests/plugin_test.luau
+    module = ('<roblox version="4"><Item class="ModuleScript" referent="RBX0"><Properties>'
+              '<string name="Name">MotiveAnimazioni</string>'
+              '<ProtectedString name="Source"><![CDATA[%s]]></ProtectedString>'
+              '</Properties></Item></roblox>') % src
+    with open(os.path.join(out_dir, "MotiveAnimazioni_modulo.rbxmx"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(module)
     print("%s (versione %s)" % (path, version))
 
 

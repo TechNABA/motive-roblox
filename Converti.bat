@@ -3,9 +3,10 @@ rem Converte gli FBX di Motive in export_motive e pubblica le take per gli stude
 setlocal
 cd /d "%~dp0"
 
-where python >nul 2>&1
+rem "where python" also finds the Windows Store stub: check that Python really runs
+python -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)" >nul 2>&1
 if errorlevel 1 (
-    echo Python non e' installato su questo PC: installalo da https://www.python.org e riprova.
+    echo Python 3 non e' installato su questo PC: installalo da https://www.python.org e riprova.
     goto fine
 )
 where git >nul 2>&1

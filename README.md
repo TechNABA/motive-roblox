@@ -82,6 +82,8 @@ Da quel momento gli studenti lo installano con un clic e Studio lo aggiorna da s
 - Test del convertitore: `MOTIVE_TEST_FBX=<una take .fbx> python -m unittest discover -s tests`
   (senza la variabile, i test che leggono un FBX vero vengono saltati).
 - File del plugin per la release: `python tools/build_plugin.py` -> `build/MotiveAnimazioni.rbxmx`.
+- Test del plugin in Studio: istruzioni in testa a `tests/plugin_test.luau` (scarica take vere da GitHub, le
+  applica a un R15 classico e a un R15 Plus creati al volo, confronta con Motive, pulisce; stampa PASS).
 - Formato di una take (`animazioni/<take>.json`): `frames` frame a `fps` 30; per ogni frame `root` (3 numeri: spostamento
   del bacino in stud sul rig R15 classico) e `rot` (15 quaternioni x, y, z, w: rotazione locale di ogni parte nell'ordine
   di `parts`, con genitori in `parents`).

@@ -76,10 +76,11 @@ def _props70(node):
 class Skeleton:
     """Bones of one take: rest transforms, animation curves and hierarchy."""
 
-    def __init__(self, models, parent, by_name, end_ticks, up_axis):
+    def __init__(self, models, parent, by_name, start_ticks, end_ticks, up_axis):
         self.models = models
         self.parent = parent
         self.by_name = by_name
+        self.start_ticks = start_ticks
         self.end_ticks = end_ticks
         self.up_axis = up_axis
 
@@ -87,10 +88,13 @@ class Skeleton:
 def load(path):
     with open(path, "rb") as f:
         buf = f.read()
-    if not buf.startswith(b"Kaydara FBX Binary"):
+    if not buf.startswith(b"Kaydara FBX Binary") or len(buf) < 27:
         raise FbxError("non e' un FBX binario (esporta da Motive in formato binario)")
     version = struct.unpack_from("<I", buf, 23)[0]
-    top = _read_nodes(buf, 27, len(buf), version >= 7500)
+    try:
+        top = _read_nodes(buf, 27, len(buf), version >= 7500)
+    except (struct.error, zlib.error, IndexError, ValueError) as e:
+        raise FbxError("file FBX danneggiato o incompleto (%s): riesportalo da Motive" % e) from e
     objects = _find(top, "Objects")
     connections = _find(top, "Connections")
     if not objects or not connections:
@@ -140,5 +144,6 @@ def load(path):
     by_name = {}
     for uid, m in models.items():
         by_name.setdefault(m["name"], uid)
+    start = min(kt[0] for kt, _ in curves.values())
     end = max(kt[-1] for kt, _ in curves.values())
-    return Skeleton(models, parent, by_name, end, up_axis)
+    return Skeleton(models, parent, by_name, start, end, up_axis)

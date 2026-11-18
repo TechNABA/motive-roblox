@@ -3,6 +3,7 @@
 The end-to-end tests need a real Motive take: set MOTIVE_TEST_FBX to its path (they are skipped otherwise).
 """
 import copy
+import struct
 import json
 import math
 import os
@@ -14,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from converter import __main__ as cli  # noqa: E402
 from converter.fbx_reader import TICKS_PER_SECOND, FbxError, load  # noqa: E402
-from converter.retarget import (FPS, M, MAP, PARTS, conj, convert, global_pose, mm, mt, mv,  # noqa: E402
+from converter.retarget import (FPS, M, PARTS, align, conj, convert, global_pose, mm, mt, mv,  # noqa: E402
                                 quat, quat_to_matrix, resolve_names, ry)
 
 SAMPLE = os.environ.get("MOTIVE_TEST_FBX", "")
@@ -53,6 +54,34 @@ class MathTests(unittest.TestCase):
     def test_safe_name(self):
         self.assertEqual(cli.safe_name("261106 Big T_001"), "261106_Big_T_001")
         self.assertEqual(cli.safe_name("***"), "take")
+        self.assertEqual(cli.safe_name("Index"), "Index_take")  # never overwrites index.json
+
+    def test_align_opposite_directions(self):
+        r = align([0, -1, 0], [0, 1, 0])
+        self.assertLess(max(abs(a - b) for a, b in zip(mv(r, [0, -1, 0]), [0, 1, 0])), 1e-9)
+        self.assertLess(max(abs(a - b) for a, b in zip(mm(r, mt(r)), [1, 0, 0, 0, 1, 0, 0, 0, 1])), 1e-9)
+
+    def test_index_ignores_foreign_json_and_leftovers(self):
+        with tempfile.TemporaryDirectory() as d:
+            src, out = os.path.join(d, "in"), os.path.join(d, "out")
+            os.makedirs(src)
+            os.makedirs(out)
+            for name, body in (("lista.json", "[1, 2]"), ("rotto.json", "{"), ("vecchio.json.tmp", "x"),
+                               ("senza.json", '{"format": "motive-roblox", "name": "x"}')):
+                with open(os.path.join(out, name), "w", encoding="utf-8") as f:
+                    f.write(body)
+            self.assertEqual(cli.main([src, out]), 0)
+            with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
+                self.assertEqual(json.load(f)["takes"], [])
+            self.assertNotIn("vecchio.json.tmp", os.listdir(out))
+
+    def test_corrupt_fbx_is_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "x.fbx")
+            with open(path, "wb") as f:
+                f.write(b"Kaydara FBX Binary  " + bytes([0, 0x1A, 0]) + struct.pack("<I", 7500) + bytes([0xFF]) * 40)
+            with self.assertRaises(FbxError):
+                load(path)
 
 
 @unittest.skipUnless(os.path.isfile(SAMPLE), "MOTIVE_TEST_FBX non impostata")
@@ -79,7 +108,7 @@ class EndToEndTests(unittest.TestCase):
         worst = 0.0
         for f in range(0, take["frames"], 7):
             world = compose(take, f)
-            src = global_pose(skel, ids, round(f * TICKS_PER_SECOND / FPS))
+            src = global_pose(skel, ids, skel.start_ticks + round(f * TICKS_PER_SECOND / FPS))
             for part, (b, c, canon) in SEGMENTS.items():
                 cur = mv(yaw, mv(M, [q - p for p, q in zip(src[b][1], src[c][1])]))
                 restdir = canon or mv(M, [q - p for p, q in zip(rest[b][1], rest[c][1])])
@@ -97,6 +126,33 @@ class EndToEndTests(unittest.TestCase):
         other = convert(big, "big")
         self.assertLess(max(abs(a - b) for a, b in zip(other["root"], self.take["root"])), 2e-3)
         self.assertAlmostEqual(other["source_leg"], self.take["source_leg"] * 1.2, places=2)
+
+    def test_take_not_starting_at_zero(self):
+        """Keys shifted by 10 s (timecode): same take, no frozen lead-in."""
+        late = copy.deepcopy(self.skel)
+        shift = 10 * TICKS_PER_SECOND
+        for m in late.models.values():
+            for key in ("T", "R"):
+                if m["curves"].get(key):
+                    m["curves"][key] = [None if c is None else (tuple(t + shift for t in c[0]), c[1])
+                                        for c in m["curves"][key]]
+        late.start_ticks += shift
+        late.end_ticks += shift
+        other = convert(late, "late")
+        self.assertEqual(other["frames"], self.take["frames"])
+        self.assertEqual(other["rot"][:60], self.take["rot"][:60])
+
+    def test_name_collision_is_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            src, out = os.path.join(d, "in"), os.path.join(d, "out")
+            os.makedirs(src)
+            for name in ("Take 1.fbx", "Take.1.fbx"):
+                with open(SAMPLE, "rb") as a, open(os.path.join(src, name), "wb") as b:
+                    b.write(a.read())
+            self.assertEqual(cli.main([src, out]), 1)
+            with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
+                self.assertEqual([t["name"] for t in json.load(f)["takes"]], ["Take 1"])
+            self.assertIn("Take.1.fbx", os.listdir(src))  # the clashing file stays in the inbox
 
     def test_missing_bone_is_reported(self):
         broken = copy.deepcopy(self.skel)

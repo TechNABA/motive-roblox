@@ -5,7 +5,7 @@ Mostra le animazioni registrate in Motive. Un clic su una take la adatta all'ava
 (R15 classico o R15 Plus, qualsiasi corpo) e la salva dove la trova l'Animation Editor (Rig > AnimSaves):
 li' si guarda nella viewport e si modifica nella timeline.
 
-Caricato come ModuleScript (senza `plugin`) restituisce le funzioni, per i test.
+Caricato come ModuleScript (senza `plugin`) restituisce le funzioni: lo usa tests/plugin_test.luau.
 ]]
 
 local HttpService = game:GetService("HttpService")
@@ -42,7 +42,12 @@ local function align(a: Vector3, b: Vector3): CFrame
 	a, b = a.Unit, b.Unit
 	local axis = a:Cross(b)
 	if axis.Magnitude < 1e-6 then
-		return CFrame.identity
+		if a:Dot(b) > 0 then
+			return CFrame.identity
+		end
+		-- opposite directions: half turn about any axis perpendicular to a
+		local perp = a:Cross(math.abs(a.X) < 0.9 and Vector3.xAxis or Vector3.yAxis).Unit
+		return CFrame.fromAxisAngle(perp, math.pi)
 	end
 	return CFrame.fromAxisAngle(axis.Unit, math.acos(math.clamp(a:Dot(b), -1, 1)))
 end
@@ -263,9 +268,6 @@ local function saveTake(rig: Model, ks: KeyframeSequence, name: string): Keyfram
 	return ks
 end
 
-local function applyTake(rig: Model, data, name: string, progress: ((number) -> ())?): KeyframeSequence
-	return saveTake(rig, buildTake(rig, data, progress), name)
-end
 
 local function isRig(inst: Instance): boolean
 	return inst:IsA("Model") and inst:FindFirstChildOfClass("Humanoid") ~= nil
@@ -309,7 +311,7 @@ local function httpGetJson(url: string)
 end
 
 local Motive = {
-	VERSION = VERSION, describeRig = describeRig, readTake = readTake, buildTake = buildTake, saveTake = saveTake, applyTake = applyTake,
+	VERSION = VERSION, describeRig = describeRig, readTake = readTake, buildTake = buildTake, saveTake = saveTake,
 	animSavesFolder = animSavesFolder, pickRig = pickRig,
 }
 
@@ -486,5 +488,14 @@ end
 
 refresh.Activated:Connect(loadList)
 paint()
+-- download the list only when the panel is open (not at every Studio start)
+local loaded = false
+local function loadIfVisible()
+	if widget.Enabled and not loaded then
+		loaded = true
+		loadList()
+	end
+end
+widget:GetPropertyChangedSignal("Enabled"):Connect(loadIfVisible)
 say("Carico l'elenco delle animazioni...")
-task.defer(loadList)
+task.defer(loadIfVisible)

@@ -89,6 +89,9 @@ def align(a, b):
     a, b = unit(a), unit(b)
     v = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
     c = sum(x * y for x, y in zip(a, b))
+    if c < -1 + 1e-9:  # opposite directions: half turn about an axis perpendicular to a
+        axis = unit([a[1], -a[0], 0] if abs(a[2]) < 0.9 else [0, a[2], -a[1]])
+        return [2 * axis[r] * axis[c2] - (1 if r == c2 else 0) for r in range(3) for c2 in range(3)]
     k = [0, -v[2], v[1], v[2], 0, -v[0], -v[1], v[0], 0]
     k2 = mm(k, k)
     return [I3[i] + k[i] + k2[i] / (1 + c) for i in range(9)]
@@ -225,7 +228,8 @@ def convert(skel, name, travel=True):
     if src_leg <= 0:
         raise FbxError("lunghezza della gamba nulla: scheletro non valido")
     scale = CANON_LEG / src_leg
-    nframes = int(round(skel.end_ticks * FPS / TICKS_PER_SECOND)) + 1
+    # the take may not start at time 0 (timecode, export range): sample from its first key
+    nframes = int(round((skel.end_ticks - skel.start_ticks) * FPS / TICKS_PER_SECOND)) + 1
     if nframes < 2:
         raise FbxError("la take e' troppo corta")
     # arms: Motive rest is a T-pose, canonical rest hangs down
@@ -238,7 +242,7 @@ def convert(skel, name, travel=True):
             offs[part] = align([0, -1, 0], d)
         else:
             offs[part] = I3
-    worlds = [global_pose(skel, ids, round(f * TICKS_PER_SECOND / FPS)) for f in range(nframes)]
+    worlds = [global_pose(skel, ids, skel.start_ticks + round(f * TICKS_PER_SECOND / FPS)) for f in range(nframes)]
     rest_inv = {b: mt(rest[b][0]) for b in ids}
     d0 = conj(mm(worlds[0]["Hips"][0], rest_inv["Hips"]))
     fwd = mv(d0, [0, 0, -1])
