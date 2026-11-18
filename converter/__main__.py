@@ -1,8 +1,10 @@
-"""Convert every Motive FBX in a folder into the take files the Roblox plugin reads.
+"""Convert Motive FBX exports into the take files the Roblox plugin reads.
 
-Usage: python -m converter [input_folder] [output_folder] [--sul-posto]
-Defaults: export_motive -> animazioni. Converted FBX move to <input_folder>/convertiti. The index (index.json) is
-rebuilt from all takes in the output folder, also when there is nothing new to convert.
+Usage: python -m converter [--out=animazioni] [--registro=FILE] [--sul-posto] [folder or .fbx ...]
+Inputs are folders (their .fbx files, not subfolders) or single .fbx files; default: export_motive.
+The FBX files are never moved: a local record (default .convertiti.json next to the output folder) remembers which
+ones are already converted (name, size, date), so they are skipped next time, a re-exported file is converted
+again, and a take deleted from the output is not recreated. The index (index.json) is always rebuilt.
 """
 import json
 import os
@@ -12,7 +14,6 @@ import sys
 from .fbx_reader import FbxError, load
 from .retarget import convert
 
-DONE_DIR = "convertiti"  # inside the input folder: FBX already converted
 INDEX = "index.json"
 
 
@@ -69,44 +70,81 @@ def convert_one(src, stem, out_path, travel):
     return take
 
 
+def file_key(path):
+    st = os.stat(path)
+    return "%s|%d|%d" % (os.path.basename(path).lower(), st.st_size, st.st_mtime_ns)
+
+
+def load_record(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        print("ATTENZIONE: il registro %s e' illeggibile, lo ricreo (gli FBX verranno riconvertiti)" % path)
+        return {}
+
+
+def collect_inputs(inputs):
+    """FBX files from folders (not subfolders) and single files; missing inputs are reported."""
+    found, missing = [], []
+    for item in inputs:
+        if os.path.isdir(item):
+            found += sorted(os.path.join(item, f) for f in os.listdir(item)
+                            if f.lower().endswith(".fbx") and os.path.isfile(os.path.join(item, f)))
+        elif os.path.isfile(item) and item.lower().endswith(".fbx"):
+            found.append(item)
+        else:
+            missing.append(item)
+    return found, missing
+
+
 def main(argv):
-    args = [a for a in argv if not a.startswith("--")]
+    opts = dict(a[2:].split("=", 1) for a in argv if a.startswith("--") and "=" in a)
     travel = "--sul-posto" not in argv
-    in_dir = args[0] if len(args) > 0 else "export_motive"
-    out_dir = args[1] if len(args) > 1 else "animazioni"
-    if not os.path.isdir(in_dir):
-        print("ERRORE: la cartella %s non esiste" % in_dir)
+    inputs = [a for a in argv if not a.startswith("--")] or ["export_motive"]
+    out_dir = opts.get("out", "animazioni")
+    record_path = opts.get("registro", os.path.join(os.path.dirname(os.path.abspath(out_dir)), ".convertiti.json"))
+    fbx, missing = collect_inputs(inputs)
+    for item in missing:
+        print("ERRORE  %s: non e' una cartella ne' un file .fbx" % item)
+    if missing and not fbx:
         return 2
     os.makedirs(out_dir, exist_ok=True)
     for fn in os.listdir(out_dir):  # leftovers of an interrupted run
         if fn.endswith(".tmp"):
             os.remove(os.path.join(out_dir, fn))
-    done_dir = os.path.join(in_dir, DONE_DIR)
-    fbx = sorted(f for f in os.listdir(in_dir)
-                 if f.lower().endswith(".fbx") and os.path.isfile(os.path.join(in_dir, f)))
-    if not fbx:
-        print("Nessun FBX nuovo in %s: aggiorno solo l'elenco." % in_dir)
-    failed = 0
-    for fn in fbx:
+    record = load_record(record_path)
+    failed = done = skipped = 0
+    seen = {}
+    for src in fbx:
+        fn = os.path.basename(src)
         stem = os.path.splitext(fn)[0]
-        src = os.path.join(in_dir, fn)
         try:
-            take = convert_one(src, stem, os.path.join(out_dir, safe_name(stem) + ".json"), travel)
+            key = file_key(src)
+            if key in record:
+                skipped += 1
+                continue
+            out_name = safe_name(stem) + ".json"
+            if out_name.lower() in seen:
+                raise FbxError("stesso nome di %s, convertito in questo giro: rinomina uno dei due" % seen[out_name.lower()])
+            take = convert_one(src, stem, os.path.join(out_dir, out_name), travel)
         except Exception as e:  # one bad file must not stop the others
             failed += 1
-            print("ERRORE  %s: %s" % (fn, e))
+            print("ERRORE  %s: %s" % (src, e))
             continue
-        # converted files leave the inbox, so a take deleted from the output is not recreated
-        try:
-            os.makedirs(done_dir, exist_ok=True)
-            os.replace(src, os.path.join(done_dir, fn))
-        except OSError as e:
-            print("ATTENZIONE %s: convertita, ma non riesco a spostarla in %s (e' aperta in un altro programma?): %s"
-                  % (fn, DONE_DIR, e))
+        seen[out_name.lower()] = src
+        record[key] = out_name
+        done += 1
         print("ok      %s  (%.1f s)" % (fn, take["seconds"]))
+    write_json(record_path, record)
     takes = build_index(out_dir)
-    print("\n%d convertite, %d con errori. Nell'elenco degli studenti: %d take." % (len(fbx) - failed, failed, len(takes)))
-    return 1 if failed else 0
+    if skipped:
+        print("\n%d FBX gia' convertiti in passato, saltati." % skipped)
+    print("\n%d convertite, %d con errori. Nell'elenco degli studenti: %d take." % (done, failed + len(missing), len(takes)))
+    return 1 if failed or missing else 0
 
 
 def run(argv):

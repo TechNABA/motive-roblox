@@ -3,6 +3,7 @@
 The end-to-end tests need a real Motive take: set MOTIVE_TEST_FBX to its path (they are skipped otherwise).
 """
 import copy
+import shutil
 import struct
 import json
 import math
@@ -82,7 +83,7 @@ class MathTests(unittest.TestCase):
                                ("senza.json", '{"format": "motive-roblox", "name": "x"}')):
                 with open(os.path.join(out, name), "w", encoding="utf-8") as f:
                     f.write(body)
-            self.assertEqual(cli.main([src, out]), 0)
+            self.assertEqual(cli.main(["--out=" + out, src]), 0)
             with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
                 self.assertEqual(json.load(f)["takes"], [])
             self.assertNotIn("vecchio.json.tmp", os.listdir(out))
@@ -155,12 +156,10 @@ class EndToEndTests(unittest.TestCase):
             src, out = os.path.join(d, "in"), os.path.join(d, "out")
             os.makedirs(src)
             for name in ("Take 1.fbx", "Take.1.fbx"):
-                with open(SAMPLE, "rb") as a, open(os.path.join(src, name), "wb") as b:
-                    b.write(a.read())
-            self.assertEqual(cli.main([src, out]), 1)
+                shutil.copy(SAMPLE, os.path.join(src, name))
+            self.assertEqual(cli.main(["--out=" + out, src]), 1)
             with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
                 self.assertEqual([t["name"] for t in json.load(f)["takes"]], ["Take 1"])
-            self.assertIn("Take.1.fbx", os.listdir(src))  # the clashing file stays in the inbox
 
     def test_missing_bone_is_reported(self):
         broken = copy.deepcopy(self.skel)
@@ -175,29 +174,38 @@ class EndToEndTests(unittest.TestCase):
         other = convert(pref, "pref")
         self.assertEqual(other["rot"][:40], self.take["rot"][:40])
 
-    def test_cli_writes_take_and_index(self):
+    def test_cli_drag_and_drop_flow(self):
         with tempfile.TemporaryDirectory() as d:
-            src, out = os.path.join(d, "in"), os.path.join(d, "out")
-            os.makedirs(src)
-            with open(SAMPLE, "rb") as a, open(os.path.join(src, "My Take.fbx"), "wb") as b:
-                b.write(a.read())
-            with open(os.path.join(src, "broken.fbx"), "wb") as b:
+            motive, out = os.path.join(d, "Motive export"), os.path.join(d, "repo", "animazioni")
+            os.makedirs(os.path.join(motive, "sottocartella"))
+            shutil.copy(SAMPLE, os.path.join(motive, "My Take.fbx"))
+            shutil.copy(SAMPLE, os.path.join(motive, "sottocartella", "ignorata.fbx"))  # subfolders are not read
+            with open(os.path.join(motive, "broken.fbx"), "wb") as b:
                 b.write(b"not an fbx")
-            code = cli.main([src, out])
-            self.assertEqual(code, 1)  # the broken file is reported, the good one converted
-            with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
-                index = json.load(f)
-            self.assertEqual([t["file"] for t in index["takes"]], ["My_Take.json"])
-            self.assertEqual(index["takes"][0]["name"], "My Take")
-            # converted FBX leave the inbox, broken ones stay
-            self.assertEqual(sorted(os.listdir(src)), ["broken.fbx", "convertiti"])
-            self.assertEqual(os.listdir(os.path.join(src, "convertiti")), ["My Take.fbx"])
-            # removing a take: delete its json, run again with nothing new -> index updated
-            os.remove(os.path.join(src, "broken.fbx"))
+            single = os.path.join(d, "Singola.fbx")
+            shutil.copy(SAMPLE, single)
+
+            def index():
+                with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
+                    return [t["name"] for t in json.load(f)["takes"]]
+
+            # a dragged folder plus a dragged file: the broken file is reported, the good ones converted
+            self.assertEqual(cli.main(["--out=" + out, motive, single]), 1)
+            self.assertEqual(index(), ["My Take", "Singola"])
+            self.assertEqual(sorted(os.listdir(motive)), ["My Take.fbx", "broken.fbx", "sottocartella"])  # nothing moved
+            self.assertTrue(os.path.isfile(os.path.join(d, "repo", ".convertiti.json")))
+            # second run: already converted files are skipped, a deleted take is not recreated
+            os.remove(os.path.join(motive, "broken.fbx"))
             os.remove(os.path.join(out, "My_Take.json"))
-            self.assertEqual(cli.main([src, out]), 0)
-            with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
-                self.assertEqual(json.load(f)["takes"], [])
+            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
+            self.assertEqual(index(), ["Singola"])
+            # a re-exported file (new date) is converted again
+            st = os.stat(os.path.join(motive, "My Take.fbx"))
+            os.utime(os.path.join(motive, "My Take.fbx"), ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
+            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
+            self.assertEqual(index(), ["My Take", "Singola"])
+            # something that is neither a folder nor an .fbx: stop
+            self.assertEqual(cli.main(["--out=" + out, os.path.join(d, "non esiste")]), 2)
 
 
 if __name__ == "__main__":

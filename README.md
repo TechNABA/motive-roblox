@@ -25,19 +25,25 @@ Motive (FBX)  ->  Converti.bat  ->  animazioni/*.json su GitHub  ->  plugin in S
 ## Pubblicare nuove take (docente, Windows)
 
 Una volta sola: clona il repository (`git clone https://github.com/TechNABA/motive-roblox`) su un PC con
-[Python](https://www.python.org) e [Git](https://git-scm.com) e con accesso in scrittura al repository.
+[Python](https://www.python.org) e [Git](https://git-scm.com) e con accesso in scrittura al repository. Comodo:
+click destro su `Converti.bat` > **Crea collegamento**, e sposta il collegamento sul desktop.
 
 Ogni volta:
 
 1. In Motive esporta le take come **FBX binario** dello scheletro, con **Y up** (le impostazioni usate finora).
-2. Copia gli FBX nella cartella `export_motive` del repository. Gli FBX non vengono pubblicati (sono esclusi da Git).
-3. Doppio clic su **`Converti.bat`**: converte, controlla e pubblica. Le take con problemi vengono elencate con il
-   motivo, restano in `export_motive` e non vengono pubblicate; le altre si', e i loro FBX passano in
-   `export_motive\convertiti`.
-4. Gli studenti vedono le take nuove nel plugin con **Aggiorna elenco** (GitHub puo' metterci qualche minuto).
+2. **Trascina la cartella degli export** (o uno o piu' file `.fbx`) su `Converti.bat` o sul suo collegamento:
+   converte, controlla e pubblica. Della cartella legge solo gli FBX che contiene, non le sottocartelle.
+   Le take con problemi vengono elencate con il motivo e non vengono pubblicate; le altre si'.
+3. Gli studenti vedono le take nuove nel plugin con **Aggiorna elenco** (GitHub puo' metterci qualche minuto).
+
+Gli FBX restano dove sono e non vengono pubblicati. Il file locale `.convertiti.json` (nella cartella del repository,
+fuori da Git) ricorda quali sono gia' convertiti: trascinare di nuovo la stessa cartella converte solo i file nuovi.
+Un FBX riesportato da Motive (data cambiata) viene riconvertito da solo. Con il doppio clic, senza trascinare,
+`Converti.bat` usa la cartella `export_motive` del repository.
 
 Per **togliere** una take: cancella il suo `.json` da `animazioni/`, poi doppio clic su `Converti.bat`.
-Per **riconvertire** una take: riporta il suo FBX da `export_motive\convertiti` a `export_motive`, poi `Converti.bat`.
+Per **riconvertire tutto** (per esempio dopo un aggiornamento del convertitore): cancella `.convertiti.json` e
+trascina di nuovo le cartelle.
 
 ### Cosa controlla il convertitore
 
@@ -49,7 +55,7 @@ Per **riconvertire** una take: riporta il suo FBX da `export_motive\convertiti` 
 | `l'attore non guarda verso +Z` | La posa di riposo dell'export e' ruotata: controlla le impostazioni di export. |
 | `Pre/PostRotation` / `ordine di rotazione` | Impostazioni di export diverse da quelle previste: riesporta con quelle standard di Motive. |
 
-Opzione: `python -m converter export_motive animazioni --sul-posto` toglie lo spostamento orizzontale (take sul posto).
+Opzione: `python -m converter --sul-posto <cartella>` toglie lo spostamento orizzontale (take sul posto).
 
 ## Il plugin per gli studenti
 

@@ -1,5 +1,7 @@
 @echo off
-rem Converte gli FBX di Motive in export_motive e pubblica le take per gli studenti.
+rem Converte gli FBX di Motive e pubblica le take per gli studenti.
+rem Trascina su questo file (o su un suo collegamento) la cartella degli export di Motive, o dei file .fbx;
+rem con il doppio clic usa la cartella export_motive.
 setlocal
 cd /d "%~dp0"
 
@@ -47,13 +49,13 @@ if not "%REBASE%"=="0" (
     echo Questa cartella e GitHub hanno modifiche diverse alle stesse take.
     echo Per ripartire da GitHub, apri un terminale in questa cartella e scrivi:
     echo     git reset --hard origin/master
-    echo poi rimetti in export_motive gli FBX da ripubblicare ^(sono in export_motive\convertiti^) e rilancia.
+    echo poi cancella il file .convertiti.json in questa cartella e trascina di nuovo gli FBX da ripubblicare.
     goto fine
 )
 
 echo.
-echo Converto gli FBX di export_motive...
-%PY% -m converter export_motive animazioni
+echo Converto gli FBX...
+%PY% -m converter %*
 if errorlevel 2 goto fine
 
 git add animazioni
