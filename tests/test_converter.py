@@ -121,6 +121,12 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(len(t["rot"]), 4 * len(PARTS) * t["frames"])
         self.assertEqual(t["root"][:3], [0.0, t["root"][1], 0.0])  # travel starts at the origin
 
+    def test_version_fingerprint(self):
+        """Same motion -> same id (whatever the name); different motion -> different id."""
+        self.assertRegex(self.take["id"], r"^[0-9a-f]{16}$")
+        self.assertEqual(convert(self.skel, "altro nome")["id"], self.take["id"])
+        self.assertNotEqual(convert(self.skel, "sample", travel=False)["id"], self.take["id"])
+
     def test_segment_directions_match_source(self):
         skel, take = self.skel, self.take
         ids = resolve_names(skel)

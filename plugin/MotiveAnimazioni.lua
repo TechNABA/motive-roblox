@@ -276,29 +276,58 @@ local function buildTake(rig: Model, data, progress: ((number) -> ())?): Keyfram
 end
 
 -- The saved animation with this name on this avatar, if any (looks only: creates nothing).
-local function findSaved(rig: Model, name: string): Instance?
+-- The avatar's saved animations container, if it exists (looks only: creates nothing).
+local function savedContainer(rig: Model): Instance?
 	local ref = rig:FindFirstChild("AnimSaves")
 	if ref and not ref:IsA("ObjectValue") then
-		return ref:FindFirstChild(name)
+		return ref
 	end
 	if ref and ref.Value and ref.Value.Parent and (not ref.Value:IsA("ObjectValue") or ref.Value.Value == rig) then
-		return ref.Value:FindFirstChild(name)
+		return ref.Value
 	end
 	local root = game:GetService("ServerStorage"):FindFirstChild("RBX_ANIMSAVES")
 	if root then
 		for _, c in root:GetChildren() do
-			if c:IsA("ObjectValue") and c.Value == rig then return c:FindFirstChild(name) end
+			if c:IsA("ObjectValue") and c.Value == rig then return c end
 		end
 	end
 	return nil
 end
 
+local function findSaved(rig: Model, name: string): Instance?
+	local container = savedContainer(rig)
+	return container and container:FindFirstChild(name)
+end
+
+-- What clicking a take does on an avatar: "same" (this version is already there, as the returned name) or
+-- "add" under the returned name: the take's own name, or "<name> (v2)"... for a corrected version of a take the
+-- avatar already has (its edits stay untouched in the old one).
+local function planSave(rig: Model, take): (string, string)
+	local container = savedContainer(rig)
+	if not container then return "add", take.name end
+	if type(take.data.id) == "string" then
+		for _, c in container:GetChildren() do
+			if c:GetAttribute("MotiveId") == take.data.id then return "same", c.Name end
+		end
+	end
+	local existing = container:FindFirstChild(take.name)
+	if not existing then return "add", take.name end
+	local existingId = existing:GetAttribute("MotiveId")
+	if type(take.data.id) ~= "string" or existingId == nil then
+		return "same", take.name -- no fingerprint to compare: treat it as the same take
+	end
+	local n = 2
+	while container:FindFirstChild(take.name .. " (v" .. n .. ")") do n += 1 end
+	return "add", take.name .. " (v" .. n .. ")"
+end
+
 -- Save an adapted take where the Animation Editor finds it. Does not yield.
-local function saveTake(rig: Model, ks: KeyframeSequence, name: string): KeyframeSequence
+local function saveTake(rig: Model, ks: KeyframeSequence, name: string, id: string?): KeyframeSequence
 	if not rig:IsDescendantOf(workspace) then
 		fail("L'avatar e' stato tolto dalla scena mentre preparavo l'animazione: riprova.")
 	end
 	ks.Name = name
+	if type(id) == "string" then ks:SetAttribute("MotiveId", id) end
 	ks.Parent = animSavesFolder(rig)
 	return ks
 end
@@ -584,7 +613,7 @@ end
 
 local Motive = {
 	VERSION = VERSION, describeRig = describeRig, readTake = readTake, buildTake = buildTake, saveTake = saveTake,
-	findSaved = findSaved, animSavesFolder = animSavesFolder, pickRigs = pickRigs, readZip = readZip,
+	findSaved = findSaved, planSave = planSave, animSavesFolder = animSavesFolder, pickRigs = pickRigs, readZip = readZip,
 	readTakes = readTakes,
 }
 
@@ -753,19 +782,20 @@ local function useTake(take)
 			fail("Ferma il Play (tasto Stop) e riprova.")
 		end
 		local rigs = pickRigs()
-		local todo, already = {}, {}
+		local todo, already = {}, {} -- todo: { rig, name to save under }
 		for _, rig in rigs do
-			if findSaved(rig, take.name) then
-				table.insert(already, rig.Name)
+			local action, name = planSave(rig, take)
+			if action == "same" then
+				table.insert(already, rig.Name .. (name ~= take.name and " (come '" .. name .. "')" or ""))
 			else
-				table.insert(todo, rig)
+				table.insert(todo, { rig = rig, name = name })
 			end
 		end
 		local built = {}
-		for i, rig in todo do
-			local prefix = #todo > 1 and string.format("Avatar %d di %d (%s): ", i, #todo, rig.Name) or ""
+		for i, job in todo do
+			local prefix = #todo > 1 and string.format("Avatar %d di %d (%s): ", i, #todo, job.rig.Name) or ""
 			say(prefix .. "adatto '" .. take.name .. "'...")
-			table.insert(built, buildTake(rig, take.data, function(p)
+			table.insert(built, buildTake(job.rig, take.data, function(p)
 				progress((i - 1 + p) / #todo)
 			end))
 		end
@@ -773,25 +803,35 @@ local function useTake(take)
 			-- the recording only wraps the instant save, so the student's own edits meanwhile stay separate
 			local recording = ChangeHistoryService:TryBeginRecording("Animazione Motive")
 			local ok, res = pcall(function()
-				for i, rig in todo do saveTake(rig, built[i], take.name) end
+				for i, job in todo do saveTake(job.rig, built[i], job.name, take.data.id) end
 			end)
 			if recording then
 				ChangeHistoryService:FinishRecording(recording, ok and Enum.FinishRecordingOperation.Commit or Enum.FinishRecordingOperation.Cancel)
 			end
 			if not ok then error(res, 0) end
 		end
-		local names = {}
-		for _, rig in todo do table.insert(names, rig.Name) end
+		local added, newer = {}, {}
+		for _, job in todo do
+			if job.name == take.name then
+				table.insert(added, job.rig.Name)
+			else
+				table.insert(newer, job.rig.Name .. " come '" .. job.name .. "'")
+			end
+		end
 		local text = ""
-		if #names > 0 then
-			text = "Fatto! '" .. take.name .. "' aggiunta a: " .. table.concat(names, ", ") .. ".\n"
+		if #added > 0 then
+			text = "Fatto! '" .. take.name .. "' aggiunta a: " .. table.concat(added, ", ") .. ".\n"
+		end
+		if #newer > 0 then
+			text ..= "Il docente ha mandato una versione nuova di '" .. take.name .. "': l'ho aggiunta a "
+				.. table.concat(newer, ", ") .. ". Quella vecchia, con le tue modifiche, resta com'era.\n"
 		end
 		if #already > 0 then
 			text ..= "'" .. take.name .. "' c'era gia' in: " .. table.concat(already, ", ") .. " (non l'ho aggiunta di nuovo).\n"
 		end
 		Selection:Set(rigs)
-		say(text .. "\nOra: scheda Avatar > Animation Editor, poi scegli '" .. take.name
-			.. "' dal menu dell'animazione. (Se l'Animation Editor era gia' aperto, chiudilo e riaprilo.)")
+		say(text .. "\nOra: scheda Avatar > Animation Editor, poi scegli l'animazione dal menu."
+			.. " (Se l'Animation Editor era gia' aperto, chiudilo e riaprilo.)")
 	end)
 end
 

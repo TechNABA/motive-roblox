@@ -6,6 +6,8 @@ The output holds, per frame, the Motor6D.Transform rotation of each of the 15 R1
 and the translation of LowerTorso. The Studio plugin adapts this to the student's avatar.
 """
 import bisect
+import hashlib
+import json
 import math
 
 from .fbx_reader import TICKS_PER_SECOND, FbxError
@@ -323,16 +325,21 @@ def convert(skel, name, travel=True):
         root = [round((xs[f] - bx[f]) * scale, 4), round((hips[f][1] - rest_h[1]) * scale, 4),
                 round((zs[f] - bz[f]) * scale, 4)]
         frames.append({"root": root, "rot": rots})
+    root_all = [x for fr in frames for x in fr["root"]]
+    rot_all = [x for fr in frames for q in fr["rot"] for x in q]
+    # fingerprint of the motion: the plugin tells a corrected take (same name, new id) from a repeated click
+    take_id = hashlib.sha1(json.dumps([FPS, root_all, rot_all]).encode("ascii")).hexdigest()[:16]
     return {
         "format": "motive-roblox",
         "version": 1,
         "name": name,
+        "id": take_id,
         "fps": FPS,
         "frames": nframes,
         "seconds": round((nframes - 1) / FPS, 3),
         "source_leg": round(src_leg, 3),
         "parts": PARTS,
         "parents": [MAP[p][1] or "HumanoidRootPart" for p in PARTS],
-        "root": [x for fr in frames for x in fr["root"]],
-        "rot": [x for fr in frames for q in fr["rot"] for x in q],
+        "root": root_all,
+        "rot": rot_all,
     }

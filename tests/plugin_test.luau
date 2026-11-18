@@ -117,7 +117,7 @@ local ok, err = pcall(function()
 		local ua = rig.LeftUpperArm.CFrame:VectorToObjectSpace(seg)
 		local fa = rig.LeftLowerArm.CFrame:VectorToObjectSpace(seg)
 		check(Motive.findSaved(rig, gw.name) == nil, rig.Name .. ": take found before saving")
-		local ks = Motive.saveTake(rig, Motive.buildTake(rig, gw), gw.name)
+		local ks = Motive.saveTake(rig, Motive.buildTake(rig, gw), gw.name, gw.id)
 		check(ks.Parent == rig.AnimSaves.Value, rig.Name .. ": take not saved under AnimSaves")
 		check(Motive.findSaved(rig, gw.name) == ks, rig.Name .. ": saved take not found (duplicate check would fail)")
 		local anim = Instance.new("Animation")
@@ -136,6 +136,19 @@ local ok, err = pcall(function()
 		check((gotFA - expectFA).Magnitude < 0.05, rig.Name .. ": forearm " .. tostring(gotFA))
 		track:Stop(0)
 	end
+
+	-- versions: the same take again is "same"; a corrected take with the same name becomes "<name> (v2)"
+	local rig1 = created[1]
+	local action, name = Motive.planSave(rig1, { name = gw.name, data = gw })
+	check(action == "same" and name == gw.name, "same version: " .. tostring(action) .. " " .. tostring(name))
+	local fixed = table.clone(gw)
+	fixed.id = "0123456789abcdef"
+	action, name = Motive.planSave(rig1, { name = gw.name, data = fixed })
+	check(action == "add" and name == gw.name .. " (v2)", "new version: " .. tostring(action) .. " " .. tostring(name))
+	Motive.saveTake(rig1, Motive.buildTake(rig1, fixed), name, fixed.id)
+	action, name = Motive.planSave(rig1, { name = gw.name, data = fixed })
+	check(action == "same" and name == gw.name .. " (v2)", "new version clicked again: " .. tostring(action) .. " " .. tostring(name))
+	check(Motive.findSaved(rig1, gw.name):GetAttribute("MotiveId") == gw.id, "old version changed")
 
 	-- a duplicated avatar (Ctrl+D) copies AnimSaves pointing at the original's holder: it must get its own
 	local copy = created[2]:Clone()
