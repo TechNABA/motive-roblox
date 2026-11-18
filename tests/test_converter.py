@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from converter import __main__ as cli  # noqa: E402
 from converter.fbx_reader import TICKS_PER_SECOND, FbxError, load  # noqa: E402
-from converter.retarget import (FPS, M, PARTS, align, conj, convert, global_pose, heading, mm, mt, mv,  # noqa: E402
+from converter.retarget import (FPS, M, PARTS, align, bone_time_range, conj, convert, global_pose, heading, mm, mt, mv,  # noqa: E402
                                 quat, quat_to_matrix, resolve_names, ry)
 
 SAMPLE = os.environ.get("MOTIVE_TEST_FBX", "")
@@ -118,7 +118,7 @@ class EndToEndTests(unittest.TestCase):
         worst = 0.0
         for f in range(0, take["frames"], 7):
             world = compose(take, f)
-            src = global_pose(skel, ids, skel.start_ticks + round(f * TICKS_PER_SECOND / FPS))
+            src = global_pose(skel, ids, bone_time_range(skel, ids)[0] + round(f * TICKS_PER_SECOND / FPS))
             for part, (b, c, canon) in SEGMENTS.items():
                 cur = mv(yaw, mv(M, [q - p for p, q in zip(src[b][1], src[c][1])]))
                 restdir = canon or mv(M, [q - p for p, q in zip(rest[b][1], rest[c][1])])
@@ -146,8 +146,6 @@ class EndToEndTests(unittest.TestCase):
                 if m["curves"].get(key):
                     m["curves"][key] = [None if c is None else (tuple(t + shift for t in c[0]), c[1])
                                         for c in m["curves"][key]]
-        late.start_ticks += shift
-        late.end_ticks += shift
         other = convert(late, "late")
         self.assertEqual(other["frames"], self.take["frames"])
         self.assertEqual(other["rot"][:60], self.take["rot"][:60])

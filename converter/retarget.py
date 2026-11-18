@@ -128,20 +128,27 @@ def quat_to_matrix(q):
 # ---- skeleton evaluation ----
 def resolve_names(skel):
     """Motive may prefix bone names with the skeleton name ("Actor_Hips"): find the prefix, check every bone."""
-    prefix = None
-    if "Hips" in skel.by_name:
-        prefix = ""
-    else:
-        for name in skel.by_name:
-            if name.endswith("Hips"):
-                prefix = name[:-4]
-                break
-    if prefix is None:
+    candidates = [name[:-4] for name in skel.by_name if name.endswith("Hips")]
+    if not candidates:
         raise FbxError("osso Hips non trovato: lo scheletro non e' quello di Motive atteso")
-    missing = [b for b in REQUIRED if prefix + b not in skel.by_name]
-    if missing:
+    complete = [p for p in candidates if all(p + b in skel.by_name for b in REQUIRED)]
+    if len(complete) > 1:
+        raise FbxError("il file contiene piu' scheletri (%s): esporta un attore per file"
+                       % ", ".join((p or "senza prefisso") for p in complete))
+    if not complete:
+        prefix = "" if "" in candidates else candidates[0]
+        missing = [b for b in REQUIRED if prefix + b not in skel.by_name]
         raise FbxError("ossa mancanti: %s (lo scheletro non e' quello di Motive atteso)" % ", ".join(missing))
-    return {b: skel.by_name[prefix + b] for b in REQUIRED}
+    return {b: skel.by_name[complete[0] + b] for b in REQUIRED}
+
+
+def bone_time_range(skel, ids):
+    """First and last key time of the skeleton bones only (markers or rigid bodies may have other ranges)."""
+    times = [(c[0][0], c[0][-1]) for uid in ids.values()
+             for curves in skel.models[uid]["curves"].values() for c in curves if c is not None]
+    if not times:
+        raise FbxError("lo scheletro non ha animazione")
+    return min(t[0] for t in times), max(t[1] for t in times)
 
 
 def _sample(curve, t, default, angular=False):
@@ -243,7 +250,8 @@ def convert(skel, name, travel=True):
         raise FbxError("lunghezza della gamba nulla: scheletro non valido")
     scale = CANON_LEG / src_leg
     # the take may not start at time 0 (timecode, export range): sample from its first key
-    nframes = int(round((skel.end_ticks - skel.start_ticks) * FPS / TICKS_PER_SECOND)) + 1
+    start, end = bone_time_range(skel, ids)
+    nframes = int(round((end - start) * FPS / TICKS_PER_SECOND)) + 1
     if nframes < 2:
         raise FbxError("la take e' troppo corta")
     # arms: Motive rest is a T-pose, canonical rest hangs down
@@ -256,7 +264,7 @@ def convert(skel, name, travel=True):
             offs[part] = align([0, -1, 0], d)
         else:
             offs[part] = I3
-    worlds = [global_pose(skel, ids, skel.start_ticks + round(f * TICKS_PER_SECOND / FPS)) for f in range(nframes)]
+    worlds = [global_pose(skel, ids, start + round(f * TICKS_PER_SECOND / FPS)) for f in range(nframes)]
     rest_inv = {b: mt(rest[b][0]) for b in ids}
     yaw_fix = ry(-heading(conj(mm(worlds[0]["Hips"][0], rest_inv["Hips"]))))  # start facing Roblox forward (-Z)
     hips = [mv(yaw_fix, mv(M, w["Hips"][1])) for w in worlds]

@@ -3,8 +3,13 @@ rem Converte gli FBX di Motive in export_motive e pubblica le take per gli stude
 setlocal
 cd /d "%~dp0"
 
-rem "where python" also finds the Windows Store stub: check that Python really runs
-python -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)" >nul 2>&1
+rem "where python" also finds the Windows Store stub: check that Python really runs; python.org installs "py"
+set PY=python
+%PY% -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)" >nul 2>&1
+if errorlevel 1 (
+    set PY=py -3
+    py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)" >nul 2>&1
+)
 if errorlevel 1 (
     echo Python 3 non e' installato su questo PC: installalo da https://www.python.org e riprova.
     goto fine
@@ -26,10 +31,17 @@ if errorlevel 1 (
     echo Non riesco a collegarmi a GitHub: controlla la connessione e riprova.
     goto fine
 )
+rem takes removed by hand are recorded first, so the rebase cannot lose them in the autostash
+git add animazioni
+git diff --cached --quiet -- animazioni
+if errorlevel 1 git commit --quiet -m "Toglie take" -- animazioni >nul 2>&1
 rem index.json is rebuilt by the converter: on a conflict keep either side (.gitattributes: merge=ours)
 git config merge.ours.driver true
 git rebase --quiet --autostash origin/master >nul 2>&1
-if errorlevel 1 (
+set REBASE=%errorlevel%
+for /f %%u in ('git diff --name-only --diff-filter=U ^| find /c /v ""') do set UNMERGED=%%u
+if not "%UNMERGED%"=="0" set REBASE=1
+if not "%REBASE%"=="0" (
     git rebase --abort >nul 2>&1
     echo.
     echo Questa cartella e GitHub hanno modifiche diverse alle stesse take.
@@ -41,7 +53,7 @@ if errorlevel 1 (
 
 echo.
 echo Converto gli FBX di export_motive...
-python -m converter export_motive animazioni
+%PY% -m converter export_motive animazioni
 if errorlevel 2 goto fine
 
 git add animazioni

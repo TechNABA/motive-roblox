@@ -57,9 +57,13 @@ def build_index(out_dir):
 
 
 def convert_one(src, stem, out_path, travel):
-    existing = read_take_header(out_path) if os.path.exists(out_path) else None
-    if existing and existing["name"] != stem:
-        raise FbxError("il nome finisce nello stesso file della take '%s': rinomina l'FBX" % existing["name"])
+    if os.path.exists(out_path):
+        existing = read_take_header(out_path)
+        if existing is None:
+            raise FbxError("in animazioni c'e' gia' un file %s che non e' una take: rinomina l'FBX"
+                           % os.path.basename(out_path))
+        if existing["name"] != stem:
+            raise FbxError("il nome finisce nello stesso file della take '%s': rinomina l'FBX" % existing["name"])
     take = convert(load(src), stem, travel)
     write_json(out_path, take)
     return take

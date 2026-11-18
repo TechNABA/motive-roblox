@@ -89,6 +89,14 @@ local ok, err = pcall(function()
 	otherTree.parents = table.clone(gw.parents)
 	otherTree.parents[table.find(gw.parts, "Head")] = "LowerTorso"
 	check(studentError(Motive.buildTake, created[1], otherTree) ~= nil, "different hierarchy not rejected")
+	-- a duplicated avatar (Ctrl+D) copies AnimSaves pointing at the original's holder: it must get its own
+	local copy = created[2]:Clone()
+	copy.Name = "MotiveTestCopia"
+	copy.Parent = workspace
+	table.insert(created, copy)
+	local ksCopy = Motive.saveTake(copy, Motive.buildTake(copy, gw), gw.name)
+	check(ksCopy.Parent ~= created[2].AnimSaves.Value and ksCopy.Parent:IsA("ObjectValue") and ksCopy.Parent.Value == copy,
+		"duplicated avatar saved into the original's slot")
 	local orphan = Motive.buildTake(created[1], gw)
 	created[1].Parent = nil
 	check(studentError(Motive.saveTake, created[1], orphan, "x") ~= nil, "removed avatar not reported")

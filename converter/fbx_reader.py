@@ -76,12 +76,10 @@ def _props70(node):
 class Skeleton:
     """Bones of one take: rest transforms, animation curves and hierarchy."""
 
-    def __init__(self, models, parent, by_name, start_ticks, end_ticks, up_axis):
+    def __init__(self, models, parent, by_name, up_axis):
         self.models = models
         self.parent = parent
         self.by_name = by_name
-        self.start_ticks = start_ticks
-        self.end_ticks = end_ticks
         self.up_axis = up_axis
 
 
@@ -144,6 +142,4 @@ def load(path):
     by_name = {}
     for uid, m in models.items():
         by_name.setdefault(m["name"], uid)
-    start = min(kt[0] for kt, _ in curves.values())
-    end = max(kt[-1] for kt, _ in curves.values())
-    return Skeleton(models, parent, by_name, start, end, up_axis)
+    return Skeleton(models, parent, by_name, up_axis)

@@ -213,7 +213,9 @@ end
 -- and the rig has AnimSaves [ObjectValue] pointing at that ObjectValue.
 local function animSavesFolder(rig: Model): Instance
 	local ref = rig:FindFirstChild("AnimSaves")
-	if ref and ref:IsA("ObjectValue") and ref.Value and ref.Value.Parent then
+	-- the holder must belong to this rig: a duplicated avatar still points at the original's holder
+	if ref and ref:IsA("ObjectValue") and ref.Value and ref.Value.Parent
+		and (not ref.Value:IsA("ObjectValue") or ref.Value.Value == rig) then
 		return ref.Value
 	end
 	if ref and not ref:IsA("ObjectValue") then
@@ -449,14 +451,11 @@ local function useTake(entry)
 		end
 		local rig = pickRig()
 		say("Scarico '" .. entry.name .. "'...")
-		local data = cache[entry.file]
-		if not data then
-			data = httpGetJson(BASE_URL .. HttpService:UrlEncode(entry.file))
-			cache[entry.file] = data
-		end
+		local data = cache[entry.file] or httpGetJson(BASE_URL .. HttpService:UrlEncode(entry.file))
 		local ks = buildTake(rig, data, function(p)
 			say(string.format("Adatto '%s' all'avatar... %d%%", entry.name, math.floor(p * 100)))
 		end)
+		cache[entry.file] = data -- only a take that passed the checks: a bad one is downloaded again next click
 		-- the recording only wraps the instant save, so the student's own edits meanwhile stay separate
 		local recording = ChangeHistoryService:TryBeginRecording("Animazione Motive")
 		local ok, res = pcall(saveTake, rig, ks, entry.name)
