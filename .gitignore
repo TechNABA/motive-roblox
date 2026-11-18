@@ -3,5 +3,5 @@
 __pycache__/
 *.pyc
 /build/
+/pacchetti/
 *.tmp
-.convertiti.json

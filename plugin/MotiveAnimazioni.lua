@@ -1,20 +1,19 @@
 --[[
 Animazioni Motive - plugin di Roblox Studio (https://github.com/TechNABA/motive-roblox)
 
-Mostra le animazioni registrate in Motive. Un clic su una take la adatta all'avatar nella scena
-(R15 classico o R15 Plus, qualsiasi corpo) e la salva dove la trova l'Animation Editor (Rig > AnimSaves):
-li' si guarda nella viewport e si modifica nella timeline.
+Apre i pacchetti di animazioni registrate in Motive (il file .zip mandato dal docente, o i file .json delle take)
+e le adatta agli avatar selezionati (R15 classico o R15 Plus, qualsiasi corpo). Ogni take viene salvata dove la
+trova l'Animation Editor (Rig > AnimSaves): li' si guarda nella viewport e si modifica nella timeline.
 
 Caricato come ModuleScript (senza `plugin`) restituisce le funzioni: lo usa tests/plugin_test.luau.
 ]]
 
-local HttpService = game:GetService("HttpService")
+local HttpService = game:GetService("HttpService") -- only JSONDecode: nothing is downloaded
 local Selection = game:GetService("Selection")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local RunService = game:GetService("RunService")
 
 local VERSION = "1.0.0"
-local BASE_URL = "https://raw.githubusercontent.com/TechNABA/motive-roblox/master/animazioni/"
 local CANON_LEG = 1.748 -- hip->ankle (studs) of the classic R15 the takes are computed on
 local DOWN = Vector3.new(0, -1, 0)
 
@@ -276,77 +275,317 @@ local function buildTake(rig: Model, data, progress: ((number) -> ())?): Keyfram
 	return ks
 end
 
+-- The saved animation with this name on this avatar, if any (looks only: creates nothing).
+local function findSaved(rig: Model, name: string): Instance?
+	local ref = rig:FindFirstChild("AnimSaves")
+	if ref and not ref:IsA("ObjectValue") then
+		return ref:FindFirstChild(name)
+	end
+	if ref and ref.Value and ref.Value.Parent and (not ref.Value:IsA("ObjectValue") or ref.Value.Value == rig) then
+		return ref.Value:FindFirstChild(name)
+	end
+	local root = game:GetService("ServerStorage"):FindFirstChild("RBX_ANIMSAVES")
+	if root then
+		for _, c in root:GetChildren() do
+			if c:IsA("ObjectValue") and c.Value == rig then return c:FindFirstChild(name) end
+		end
+	end
+	return nil
+end
+
 -- Save an adapted take where the Animation Editor finds it. Does not yield.
 local function saveTake(rig: Model, ks: KeyframeSequence, name: string): KeyframeSequence
 	if not rig:IsDescendantOf(workspace) then
 		fail("L'avatar e' stato tolto dalla scena mentre preparavo l'animazione: riprova.")
 	end
-	local folder = animSavesFolder(rig)
-	-- never overwrite: a saved animation may hold a student's edits
-	local final, k = name, 1
-	while folder:FindFirstChild(final) do
-		k += 1
-		final = name .. " (" .. k .. ")"
-	end
-	ks.Name = final
-	ks.Parent = folder
+	ks.Name = name
+	ks.Parent = animSavesFolder(rig)
 	return ks
 end
-
 
 local function isRig(inst: Instance): boolean
 	return inst:IsA("Model") and inst:FindFirstChildOfClass("Humanoid") ~= nil
 end
 
--- The avatar to animate: the selected one, or the only one in the scene.
-local function pickRig(): Model
+-- The avatars to animate: the selected ones, or the only one in the scene.
+local function pickRigs(): { Model }
+	local rigs, seen = {}, {}
 	for _, s in Selection:Get() do
 		local r = s
 		while r and r ~= workspace and r ~= game and not isRig(r) do r = r.Parent end
-		if r and r ~= workspace and r ~= game and r:IsDescendantOf(workspace) then return r end
+		if r and r ~= workspace and r ~= game and r:IsDescendantOf(workspace) and not seen[r] then
+			seen[r] = true
+			table.insert(rigs, r)
+		end
 	end
-	local rigs = {}
+	if #rigs > 0 then return rigs end
 	for _, m in workspace:GetDescendants() do
 		if isRig(m) then table.insert(rigs, m) end
 	end
 	if #rigs == 0 then
 		fail("Nella scena non c'e' nessun avatar.\nCrealo dalla scheda Avatar > Character, poi riprova.")
 	elseif #rigs > 1 then
-		fail("Nella scena ci sono " .. #rigs .. " avatar.\nClicca sull'avatar da animare, poi riprova.")
+		fail("Nella scena ci sono " .. #rigs .. " avatar: selezionali (Ctrl+clic per sceglierne piu' di uno), poi riprova.")
 	end
-	return rigs[1]
+	return rigs
 end
 
--- Download and decode a JSON file. missingMessage is shown when the file is not on GitHub (HTTP 404).
-local function httpGetJson(url: string, missingMessage: string)
-	local ok, res = pcall(function()
-		return HttpService:RequestAsync({ Url = url .. "?v=" .. tostring(os.time()), Method = "GET",
-			Headers = { ["Cache-Control"] = "no-cache" } })
-	end)
-	if not ok then
-		local msg = tostring(res)
-		local low = msg:lower()
-		if low:find("permission") or low:find("not allowed") or low:find("denied") then
-			fail("Studio non lascia scaricare le animazioni.\nVai in Plugins > Manage Plugins, apri 'Animazioni Motive' e consenti l'accesso a raw.githubusercontent.com.")
+----------------------------------------------------------------------------------------------- packages (.zip)
+-- Raw DEFLATE decoder (RFC 1951), for packages re-compressed by Windows or macOS. Converti.bat stores files
+-- uncompressed, which needs no decoding at all.
+local LEN_BASE = { 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258 }
+local LEN_EXTRA = { 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0 }
+local DIST_BASE = { 1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049,
+	3073, 4097, 6145, 8193, 12289, 16385, 24577 }
+local DIST_EXTRA = { 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13 }
+local CL_ORDER = { 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 }
+
+local function inflate(src: buffer, start: number, srcLen: number, outLen: number): buffer
+	local out = buffer.create(outLen)
+	local pos, stop, op = start, start + srcLen, 0
+	local bitbuf, bitcnt = 0, 0
+	local function damaged()
+		fail("Il pacchetto e' danneggiato: chiedi al docente di rimandarlo.")
+	end
+	local function bits(n: number): number
+		while bitcnt < n do
+			if pos >= stop then damaged() end
+			bitbuf = bit32.bor(bitbuf, bit32.lshift(buffer.readu8(src, pos), bitcnt))
+			pos += 1
+			bitcnt += 8
 		end
-		fail("Non riesco a scaricare le animazioni: controlla la connessione a internet e riprova.\n(" .. msg .. ")")
+		local v = bit32.band(bitbuf, bit32.lshift(1, n) - 1)
+		bitbuf = bit32.rshift(bitbuf, n)
+		bitcnt -= n
+		return v
 	end
-	if res.StatusCode == 404 then
-		fail(missingMessage)
+	-- canonical Huffman table (as in zlib's puff.c): count[len] codes of each length, symbols in code order.
+	-- Both tables are 0-based.
+	local function build(lengths: { [number]: number }, n: number)
+		local count, offs, symbol = {}, {}, {}
+		for len = 0, 15 do count[len] = 0 end
+		for i = 0, n - 1 do
+			local len = lengths[i] or 0
+			count[len] += 1
+		end
+		offs[1] = 0
+		for len = 1, 14 do offs[len + 1] = offs[len] + count[len] end
+		for i = 0, n - 1 do
+			local len = lengths[i] or 0
+			if len > 0 then
+				symbol[offs[len]] = i
+				offs[len] += 1
+			end
+		end
+		return count, symbol
 	end
-	if not res.Success then
-		fail("Il server ha risposto con un errore (" .. tostring(res.StatusCode) .. "): riprova tra qualche minuto.")
+	local function decode(count, symbol): number
+		local code, first, index = 0, 0, 0
+		for len = 1, 15 do
+			code = bit32.bor(code, bits(1))
+			local c = count[len]
+			if code - c < first then
+				return symbol[index + (code - first)]
+			end
+			index += c
+			first = (first + c) * 2
+			code *= 2
+		end
+		damaged()
+		return 0
 	end
-	local okJson, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
-	if not okJson then
-		fail("Il server ha risposto in modo strano: riprova tra qualche minuto.")
+	local function codes(lcount, lsym, dcount, dsym)
+		while true do
+			local sym = decode(lcount, lsym)
+			if sym < 256 then
+				if op >= outLen then damaged() end
+				buffer.writeu8(out, op, sym)
+				op += 1
+			elseif sym == 256 then
+				return
+			else
+				sym -= 257
+				if sym >= 29 then damaged() end
+				local len = LEN_BASE[sym + 1] + bits(LEN_EXTRA[sym + 1])
+				local ds = decode(dcount, dsym)
+				if ds >= 30 then damaged() end
+				local dist = DIST_BASE[ds + 1] + bits(DIST_EXTRA[ds + 1])
+				if dist > op or op + len > outLen then damaged() end
+				for _ = 1, len do
+					buffer.writeu8(out, op, buffer.readu8(out, op - dist))
+					op += 1
+				end
+			end
+		end
 	end
-	return data
+	local fixedL, fixedD
+	repeat
+		local last = bits(1)
+		local kind = bits(2)
+		if kind == 0 then
+			bitbuf, bitcnt = 0, 0 -- stored block: byte aligned
+			if pos + 4 > stop then damaged() end
+			local len = buffer.readu16(src, pos)
+			pos += 4
+			if pos + len > stop or op + len > outLen then damaged() end
+			buffer.copy(out, op, src, pos, len)
+			pos += len
+			op += len
+		elseif kind == 1 then
+			if not fixedL then
+				local l = {}
+				for i = 0, 143 do l[i] = 8 end
+				for i = 144, 255 do l[i] = 9 end
+				for i = 256, 279 do l[i] = 7 end
+				for i = 280, 287 do l[i] = 8 end
+				local d = {}
+				for i = 0, 29 do d[i] = 5 end
+				fixedL = { build(l, 288) }
+				fixedD = { build(d, 30) }
+			end
+			codes(fixedL[1], fixedL[2], fixedD[1], fixedD[2])
+		elseif kind == 2 then
+			local nlen, ndist, ncode = bits(5) + 257, bits(5) + 1, bits(4) + 4
+			local cl = {}
+			for i = 0, 18 do cl[i] = 0 end
+			for i = 1, ncode do cl[CL_ORDER[i]] = bits(3) end
+			local ccount, csym = build(cl, 19)
+			local lengths, i = {}, 0
+			while i < nlen + ndist do
+				local sym = decode(ccount, csym)
+				if sym < 16 then
+					lengths[i] = sym
+					i += 1
+				else
+					local rep, val = 0, 0
+					if sym == 16 then
+						if i == 0 then damaged() end
+						val, rep = lengths[i - 1], 3 + bits(2)
+					elseif sym == 17 then
+						rep = 3 + bits(3)
+					else
+						rep = 11 + bits(7)
+					end
+					if i + rep > nlen + ndist then damaged() end
+					for _ = 1, rep do
+						lengths[i] = val
+						i += 1
+					end
+				end
+			end
+			local dl = {}
+			for k = 0, ndist - 1 do dl[k] = lengths[nlen + k] end
+			local lcount, lsym = build(lengths, nlen)
+			local dcount, dsym = build(dl, ndist)
+			codes(lcount, lsym, dcount, dsym)
+		else
+			damaged()
+		end
+	until last == 1
+	if op ~= outLen then damaged() end
+	return out
+end
+
+-- Files of a .zip: { [name] = contents }. Stored and deflated entries; macOS metadata is skipped.
+local function readZip(bin: string): { [string]: string }
+	local b = buffer.fromstring(bin)
+	local size = buffer.len(b)
+	local function notZip()
+		fail("Questo file non e' un pacchetto valido: scegli il .zip che ti ha mandato il docente.")
+	end
+	local eocd
+	for p = size - 22, math.max(0, size - 65557), -1 do
+		if buffer.readu32(b, p) == 0x06054b50 then
+			eocd = p
+			break
+		end
+	end
+	if not eocd then notZip() end
+	local entries, cdPos = buffer.readu16(b, eocd + 10), buffer.readu32(b, eocd + 16)
+	local files = {}
+	for _ = 1, entries do
+		if cdPos + 46 > size or buffer.readu32(b, cdPos) ~= 0x02014b50 then notZip() end
+		local flags, method = buffer.readu16(b, cdPos + 8), buffer.readu16(b, cdPos + 10)
+		local csize, usize = buffer.readu32(b, cdPos + 20), buffer.readu32(b, cdPos + 24)
+		local nlen, elen, clen = buffer.readu16(b, cdPos + 28), buffer.readu16(b, cdPos + 30), buffer.readu16(b, cdPos + 32)
+		local loc = buffer.readu32(b, cdPos + 42)
+		local name = buffer.readstring(b, cdPos + 46, nlen)
+		cdPos += 46 + nlen + elen + clen
+		local skip = name:sub(-1) == "/" or name:find("__MACOSX", 1, true) or name:match("[/\\]%._") or name:match("^%._")
+		if not skip then
+			if bit32.band(flags, 1) ~= 0 then
+				fail("Il pacchetto e' protetto da password: chiedi al docente un pacchetto senza password.")
+			end
+			if loc + 30 > size or buffer.readu32(b, loc) ~= 0x04034b50 then notZip() end
+			local data = loc + 30 + buffer.readu16(b, loc + 26) + buffer.readu16(b, loc + 28)
+			if data + csize > size then notZip() end
+			if method == 0 then
+				files[name] = buffer.readstring(b, data, csize)
+			elseif method == 8 then
+				files[name] = buffer.tostring(inflate(b, data, csize, usize))
+			else
+				fail("Il pacchetto usa una compressione non supportata: chiedi al docente di rimandarlo.")
+			end
+		end
+	end
+	return files
+end
+
+local function decodeJson(text: string)
+	local ok, data = pcall(function() return HttpService:JSONDecode(text) end)
+	return ok and data or nil
+end
+
+-- Takes from the chosen files: .zip packages and/or loose .json takes (a Mac may unpack the zip by itself).
+-- Returns a list of { name = string, data = table }, in package order.
+local function readTakes(files: { { name: string, contents: string } }, progress: ((number) -> ())?)
+	local takes, seen = {}, {}
+	local function add(data)
+		if type(data) == "table" and data.format == "motive-roblox" and type(data.name) == "string" and not seen[data.name] then
+			seen[data.name] = true
+			table.insert(takes, { name = data.name, data = data })
+		end
+	end
+	for i, f in files do
+		if f.name:lower():match("%.zip$") then
+			local entries = readZip(f.contents)
+			local order = {}
+			for path, text in entries do
+				if path:match("pacchetto%.json$") then
+					local manifest = decodeJson(text)
+					if type(manifest) == "table" and type(manifest.takes) == "table" then
+						local dir = path:match("^(.*/)") or ""
+						for _, t in manifest.takes do
+							if type(t) == "table" and type(t.file) == "string" then table.insert(order, dir .. t.file) end
+						end
+					end
+				end
+			end
+			for path in entries do
+				if path:lower():match("%.json$") and not path:match("pacchetto%.json$") and not table.find(order, path) then
+					table.insert(order, path)
+				end
+			end
+			for k, path in order do
+				if entries[path] then add(decodeJson(entries[path])) end
+				if progress then progress((i - 1 + k / #order) / #files) end
+				if k % 5 == 0 then task.wait() end
+			end
+		else
+			add(decodeJson(f.contents))
+			if progress then progress(i / #files) end
+		end
+	end
+	if #takes == 0 then
+		fail("In questi file non ci sono animazioni Motive: scegli il .zip che ti ha mandato il docente.")
+	end
+	return takes
 end
 
 local Motive = {
 	VERSION = VERSION, describeRig = describeRig, readTake = readTake, buildTake = buildTake, saveTake = saveTake,
-	animSavesFolder = animSavesFolder, pickRig = pickRig, httpGetJson = httpGetJson, BASE_URL = BASE_URL,
+	findSaved = findSaved, animSavesFolder = animSavesFolder, pickRigs = pickRigs, readZip = readZip,
+	readTakes = readTakes,
 }
 
 if not plugin then
@@ -380,29 +619,41 @@ root.Size = UDim2.fromScale(1, 1)
 root.BorderSizePixel = 0
 root.Parent = widget
 
-local status = Instance.new("TextLabel")
+local function label(size: number, font: Enum.Font): TextLabel
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.TextWrapped = true
+	l.TextXAlignment = Enum.TextXAlignment.Left
+	l.TextYAlignment = Enum.TextYAlignment.Top
+	l.Font = font
+	l.TextSize = size
+	return l
+end
+
+local status = label(17, Enum.Font.SourceSansSemibold)
 status.Size = UDim2.new(1, -16, 0, 0)
-status.AutomaticSize = Enum.AutomaticSize.Y -- long messages push the button and the list down
+status.AutomaticSize = Enum.AutomaticSize.Y -- long messages push everything below down
 status.Position = UDim2.fromOffset(8, 8)
-status.BackgroundTransparency = 1
-status.TextWrapped = true
-status.TextXAlignment = Enum.TextXAlignment.Left
-status.TextYAlignment = Enum.TextYAlignment.Top
-status.Font = Enum.Font.SourceSansSemibold
-status.TextSize = 17
 status.Parent = root
 
-local refresh = Instance.new("TextButton")
-refresh.Size = UDim2.new(1, -16, 0, 30)
-refresh.Position = UDim2.fromOffset(8, 40)
-refresh.Font = Enum.Font.SourceSans
-refresh.TextSize = 16
-refresh.Text = "Aggiorna elenco"
-refresh.Parent = root
+local bar = Instance.new("Frame")
+bar.Size = UDim2.new(1, -16, 0, 10)
+bar.BorderSizePixel = 0
+bar.Visible = false
+bar.Parent = root
+local fill = Instance.new("Frame")
+fill.Size = UDim2.fromScale(0, 1)
+fill.BorderSizePixel = 0
+fill.Parent = bar
+
+local open = Instance.new("TextButton")
+open.Size = UDim2.new(1, -16, 0, 36)
+open.Font = Enum.Font.SourceSansSemibold
+open.TextSize = 18
+open.Text = "Apri pacchetto..."
+open.Parent = root
 
 local list = Instance.new("ScrollingFrame")
-list.Size = UDim2.new(1, -16, 1, -106)
-list.Position = UDim2.fromOffset(8, 78)
 list.BorderSizePixel = 0
 list.ScrollBarThickness = 8
 list.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -413,43 +664,50 @@ layout.Padding = UDim.new(0, 4)
 layout.SortOrder = Enum.SortOrder.LayoutOrder
 layout.Parent = list
 
-local footer = Instance.new("TextLabel")
+local footer = label(13, Enum.Font.SourceSans)
 footer.Size = UDim2.new(1, -16, 0, 20)
 footer.Position = UDim2.new(0, 8, 1, -24)
-footer.BackgroundTransparency = 1
-footer.Font = Enum.Font.SourceSans
-footer.TextSize = 13
-footer.TextXAlignment = Enum.TextXAlignment.Left
 footer.Text = "versione " .. VERSION
 footer.Parent = root
 
--- the button and the list sit right below the message, whatever its height
+-- everything sits right below the message, whatever its height
 local function relayout()
 	local y = 8 + status.AbsoluteSize.Y + 8
-	refresh.Position = UDim2.fromOffset(8, y)
-	list.Position = UDim2.fromOffset(8, y + 38)
-	list.Size = UDim2.new(1, -16, 1, -(y + 38 + 28))
+	bar.Position = UDim2.fromOffset(8, y)
+	if bar.Visible then y += 18 end
+	open.Position = UDim2.fromOffset(8, y)
+	list.Position = UDim2.fromOffset(8, y + 44)
+	list.Size = UDim2.new(1, -16, 1, -(y + 44 + 28))
 end
 status:GetPropertyChangedSignal("AbsoluteSize"):Connect(relayout)
-relayout()
 
+local busy = false
 local statusKind = "info"
 local function paintStatus()
 	status.TextColor3 = statusKind == "error" and color(Enum.StudioStyleGuideColor.ErrorText)
 		or color(Enum.StudioStyleGuideColor.MainText)
 end
 
+local function paintButton(b: TextButton)
+	b.AutoButtonColor = not busy
+	b.BackgroundColor3 = color(Enum.StudioStyleGuideColor.Button,
+		busy and Enum.StudioStyleGuideModifier.Disabled or Enum.StudioStyleGuideModifier.Default)
+	b.TextColor3 = color(Enum.StudioStyleGuideColor.ButtonText,
+		busy and Enum.StudioStyleGuideModifier.Disabled or Enum.StudioStyleGuideModifier.Default)
+	b.BorderColor3 = color(Enum.StudioStyleGuideColor.ButtonBorder)
+end
+
 local function paint()
 	root.BackgroundColor3 = color(Enum.StudioStyleGuideColor.MainBackground)
 	list.BackgroundColor3 = color(Enum.StudioStyleGuideColor.MainBackground)
+	bar.BackgroundColor3 = color(Enum.StudioStyleGuideColor.InputFieldBackground)
+	fill.BackgroundColor3 = color(Enum.StudioStyleGuideColor.DialogMainButton)
 	footer.TextColor3 = color(Enum.StudioStyleGuideColor.DimmedText)
 	paintStatus()
-	for _, b in { refresh, table.unpack(list:GetChildren()) } do
-		if b:IsA("TextButton") then
-			b.BackgroundColor3 = color(Enum.StudioStyleGuideColor.Button)
-			b.TextColor3 = color(Enum.StudioStyleGuideColor.ButtonText)
-			b.BorderColor3 = color(Enum.StudioStyleGuideColor.ButtonBorder)
-		end
+	paintButton(open)
+	for _, c in list:GetChildren() do
+		if c:IsA("TextButton") then paintButton(c) end
+		if c:IsA("TextLabel") then c.TextColor3 = color(Enum.StudioStyleGuideColor.DimmedText) end
 	end
 end
 studio.ThemeChanged:Connect(paint)
@@ -460,15 +718,22 @@ local function say(text: string, kind: string?)
 	paintStatus()
 end
 
-local busy = false
-local cache = {}
+-- progress bar: a fraction 0..1, or nil to hide it
+local function progress(p: number?)
+	bar.Visible = p ~= nil
+	fill.Size = UDim2.fromScale(math.clamp(p or 0, 0, 1), 1)
+	relayout()
+end
 
--- Run an action with the busy guard, showing student errors in the panel.
+-- Run an action with the busy guard: buttons greyed out, student errors shown in the panel.
 local function run(action: () -> ())
 	if busy then return end
 	busy = true
+	paint()
 	local ok, err = pcall(action)
 	busy = false
+	progress(nil)
+	paint()
 	if not ok then
 		if type(err) == "table" and err.student then
 			say(err.student, "error")
@@ -479,71 +744,102 @@ local function run(action: () -> ())
 	end
 end
 
-local function useTake(entry)
+local HELP = "1. Apri il pacchetto che ti ha mandato il docente.\n2. Crea l'avatar: scheda Avatar > Character.\n"
+	.. "3. Seleziona l'avatar (Ctrl+clic per piu' avatar) e clicca un'animazione."
+
+local function useTake(take)
 	run(function()
 		if RunService:IsRunning() then
 			fail("Ferma il Play (tasto Stop) e riprova.")
 		end
-		local rig = pickRig()
-		say("Scarico '" .. entry.name .. "'...")
-		local data = cache[entry.file] or httpGetJson(BASE_URL .. HttpService:UrlEncode(entry.file),
-			"Questa animazione non c'e' piu': clicca Aggiorna elenco.")
-		local ks = buildTake(rig, data, function(p)
-			say(string.format("Adatto '%s' all'avatar... %d%%", entry.name, math.floor(p * 100)))
-		end)
-		cache[entry.file] = data -- only a take that passed the checks: a bad one is downloaded again next click
-		-- the recording only wraps the instant save, so the student's own edits meanwhile stay separate
-		local recording = ChangeHistoryService:TryBeginRecording("Animazione Motive")
-		local ok, res = pcall(saveTake, rig, ks, entry.name)
-		if recording then
-			ChangeHistoryService:FinishRecording(recording, ok and Enum.FinishRecordingOperation.Commit or Enum.FinishRecordingOperation.Cancel)
-		end
-		if not ok then error(res, 0) end
-		Selection:Set({ rig })
-		say("Fatto! '" .. res.Name .. "' e' pronta.\n\nOra: scheda Avatar > Animation Editor, poi scegli '" .. res.Name
-			.. "' dal menu dell'animazione.\n(Se l'Animation Editor era gia' aperto, chiudilo e riaprilo.)")
-	end)
-end
-
-local function loadList()
-	run(function()
-		say("Carico l'elenco delle animazioni...")
-		table.clear(cache) -- a take republished under the same name must be downloaded again
-		local index = httpGetJson(BASE_URL .. "index.json", "L'elenco delle animazioni non si trova: avvisa il docente.")
-		if type(index) ~= "table" or type(index.takes) ~= "table" then
-			fail("L'elenco delle animazioni e' danneggiato: avvisa il docente.")
-		end
-		for _, c in list:GetChildren() do
-			if c:IsA("TextButton") then c:Destroy() end
-		end
-		for i, entry in index.takes do
-			if type(entry) == "table" and type(entry.name) == "string" and type(entry.file) == "string" then
-				local b = Instance.new("TextButton")
-				b.Size = UDim2.new(1, -10, 0, 34)
-				b.LayoutOrder = i
-				b.Font = Enum.Font.SourceSans
-				b.TextSize = 16
-				b.TextXAlignment = Enum.TextXAlignment.Left
-				b.Text = "  " .. entry.name .. (type(entry.seconds) == "number" and string.format("   (%.0f s)", entry.seconds) or "")
-				b.Parent = list
-				b.Activated:Connect(function() useTake(entry) end)
+		local rigs = pickRigs()
+		local todo, already = {}, {}
+		for _, rig in rigs do
+			if findSaved(rig, take.name) then
+				table.insert(already, rig.Name)
+			else
+				table.insert(todo, rig)
 			end
 		end
-		paint() -- color the new buttons
-		say("1. Crea il tuo avatar: scheda Avatar > Character.\n2. Clicca un'animazione qui sotto.", "info")
+		local built = {}
+		for i, rig in todo do
+			local prefix = #todo > 1 and string.format("Avatar %d di %d (%s): ", i, #todo, rig.Name) or ""
+			say(prefix .. "adatto '" .. take.name .. "'...")
+			table.insert(built, buildTake(rig, take.data, function(p)
+				progress((i - 1 + p) / #todo)
+			end))
+		end
+		if #built > 0 then
+			-- the recording only wraps the instant save, so the student's own edits meanwhile stay separate
+			local recording = ChangeHistoryService:TryBeginRecording("Animazione Motive")
+			local ok, res = pcall(function()
+				for i, rig in todo do saveTake(rig, built[i], take.name) end
+			end)
+			if recording then
+				ChangeHistoryService:FinishRecording(recording, ok and Enum.FinishRecordingOperation.Commit or Enum.FinishRecordingOperation.Cancel)
+			end
+			if not ok then error(res, 0) end
+		end
+		local names = {}
+		for _, rig in todo do table.insert(names, rig.Name) end
+		local text = ""
+		if #names > 0 then
+			text = "Fatto! '" .. take.name .. "' aggiunta a: " .. table.concat(names, ", ") .. ".\n"
+		end
+		if #already > 0 then
+			text ..= "'" .. take.name .. "' c'era gia' in: " .. table.concat(already, ", ") .. " (non l'ho aggiunta di nuovo).\n"
+		end
+		Selection:Set(rigs)
+		say(text .. "\nOra: scheda Avatar > Animation Editor, poi scegli '" .. take.name
+			.. "' dal menu dell'animazione. (Se l'Animation Editor era gia' aperto, chiudilo e riaprilo.)")
 	end)
 end
 
-refresh.Activated:Connect(loadList)
-paint()
--- download the list only when the panel is open (not at every Studio start)
-local loaded = false
-local function loadIfVisible()
-	if widget.Enabled and not loaded then
-		loaded = true
-		loadList()
+local loaded = {} -- takes of the opened packages, by name
+local function showTakes(takes, title: string)
+	local order = #list:GetChildren()
+	local header = label(14, Enum.Font.SourceSansSemibold)
+	header.Size = UDim2.new(1, -10, 0, 22)
+	header.LayoutOrder = order
+	header.Text = title
+	header.Parent = list
+	for i, take in takes do
+		if loaded[take.name] then
+			loaded[take.name].data = take.data -- reopened package: use the newer data
+		else
+			loaded[take.name] = take
+			local b = Instance.new("TextButton")
+			b.Size = UDim2.new(1, -10, 0, 34)
+			b.LayoutOrder = order + i
+			b.Font = Enum.Font.SourceSans
+			b.TextSize = 16
+			b.TextXAlignment = Enum.TextXAlignment.Left
+			local seconds = type(take.data.seconds) == "number" and string.format("   (%.0f s)", take.data.seconds) or ""
+			b.Text = "  " .. take.name .. seconds
+			b.Parent = list
+			b.Activated:Connect(function() useTake(loaded[take.name]) end)
+		end
 	end
+	paint()
 end
-widget:GetPropertyChangedSignal("Enabled"):Connect(loadIfVisible)
-say("Carico l'elenco delle animazioni...")
-task.defer(loadIfVisible)
+
+open.Activated:Connect(function()
+	run(function()
+		local chosen = game:GetService("StudioService"):PromptImportFilesAsync({ "zip", "json" })
+		if not chosen or #chosen == 0 then return end -- choice cancelled
+		say("Apro il pacchetto...")
+		progress(0)
+		local files, names = {}, {}
+		for _, f in chosen do
+			table.insert(files, { name = f.Name, contents = f:GetBinaryContents() })
+			table.insert(names, f.Name)
+		end
+		local takes = readTakes(files, progress)
+		showTakes(takes, table.concat(names, ", "))
+		say(string.format("Pacchetto aperto: %d animazioni.\n\n", #takes) .. HELP)
+	end)
+end)
+
+paint()
+say(HELP)
+relayout()

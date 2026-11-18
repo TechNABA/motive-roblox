@@ -1,112 +1,32 @@
-"""Convert Motive FBX exports into the take files the Roblox plugin reads.
+"""Convert Motive FBX exports into a take package (.zip) for the Roblox Studio plugin.
 
-Usage: python -m converter [--out=animazioni] [--sul-posto] [folder or .fbx ...]
-Inputs are folders (their .fbx files, not subfolders) or single .fbx files; default: export_motive.
+Usage: python -m converter [--sul-posto] [--out=CARTELLA] <folder or .fbx> [...]
+Inputs are folders (their .fbx files, not subfolders) or single .fbx files. The package is written to
+<out>/Motive_<name>.zip (default out: "pacchetti" next to the converter), where <name> is the dragged folder's
+name, or the date and time when several inputs are given. The zip holds one JSON file per take and pacchetto.json,
+the list of takes. Files are stored uncompressed: the plugin reads them directly.
 
-- The FBX files are never moved. A local record (.convertiti.json next to the output folder, not in Git) remembers
-  which ones are already converted (name, size, date): they are skipped, a re-exported file is converted again.
-- A take removed by deleting its .json is listed in tolte.json (published with the takes), so no PC converts it again.
-- index.json (the list the students see) is rebuilt on every run.
-
-Exit codes: 0 all fine, 10 some files rejected (the others can be published); anything else: publish nothing.
+Exit codes: 0 all converted, 10 some files rejected (the package holds the others), 2 nothing to package.
 """
+import datetime
 import json
 import os
 import re
 import sys
+import zipfile
 
 from .fbx_reader import FbxError, load
 from .retarget import convert
 
-INDEX = "index.json"
-REMOVED = "tolte.json"
+MANIFEST = "pacchetto.json"
 PARTIAL = 10
+KNOWN_OPTIONS = ("--out=", "--sul-posto")
+DEFAULT_OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pacchetti")
 
 
 def safe_name(stem):
     name = re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_") or "take"
-    return name + "_take" if name.lower() in ("index", "tolte") else name
-
-
-def write_json(path, data):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, separators=(",", ":"), ensure_ascii=False)
-    os.replace(tmp, path)
-
-
-def read_json(path, default):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return default
-
-
-def read_take_header(path):
-    """Name, seconds and frames of a take file, or None if the file is not a take."""
-    d = read_json(path, None)
-    if not isinstance(d, dict) or d.get("format") != "motive-roblox":
-        return None
-    name, seconds, frames = d.get("name"), d.get("seconds"), d.get("frames")
-    if not isinstance(name, str) or not isinstance(seconds, (int, float)) or not isinstance(frames, int):
-        return None
-    return {"name": name, "seconds": seconds, "frames": frames}
-
-
-def build_index(out_dir):
-    takes = []
-    for fn in sorted(os.listdir(out_dir)):
-        if not fn.endswith(".json") or fn.lower() in (INDEX, REMOVED):
-            continue
-        head = read_take_header(os.path.join(out_dir, fn))
-        if head:
-            takes.append({"name": head["name"], "file": fn, "seconds": head["seconds"], "frames": head["frames"]})
-    takes.sort(key=lambda t: t["name"].lower())
-    write_json(os.path.join(out_dir, INDEX), {"format": "motive-roblox-index", "version": 1, "takes": takes})
-    return takes
-
-
-def update_removed(out_dir):
-    """Takes listed in the last published index whose file is gone were removed on purpose: remember them."""
-    path = os.path.join(out_dir, REMOVED)
-    removed = read_json(path, {})
-    files = set(removed.get("takes", [])) if isinstance(removed, dict) else set()
-    index = read_json(os.path.join(out_dir, INDEX), {})
-    for t in index.get("takes", []) if isinstance(index, dict) else []:
-        if isinstance(t, dict) and isinstance(t.get("file"), str) and not os.path.exists(os.path.join(out_dir, t["file"])):
-            files.add(t["file"])
-    write_json(path, {"format": "motive-roblox-tolte", "version": 1, "takes": sorted(files)})
-    return files
-
-
-def convert_one(src, stem, out_path, travel):
-    if os.path.exists(out_path):
-        existing = read_take_header(out_path)
-        if existing is None:
-            raise FbxError("in animazioni c'e' gia' un file %s che non e' una take: rinomina l'FBX"
-                           % os.path.basename(out_path))
-        if existing["name"] != stem:
-            raise FbxError("il nome finisce nello stesso file della take '%s': rinomina l'FBX" % existing["name"])
-    take = convert(load(src), stem, travel)
-    write_json(out_path, take)
-    return take
-
-
-def file_key(path):
-    st = os.stat(path)
-    return "%s|%d|%d" % (os.path.basename(path).lower(), st.st_size, st.st_mtime_ns)
-
-
-def load_record(path):
-    """{"files": {fbx key: take file}, "origin": {take file: folder of its FBX}}"""
-    if not os.path.exists(path):
-        return {"files": {}, "origin": {}}
-    data = read_json(path, None)
-    if not (isinstance(data, dict) and isinstance(data.get("files"), dict) and isinstance(data.get("origin"), dict)):
-        print("ATTENZIONE: il registro %s e' illeggibile, lo ricreo (gli FBX verranno riconvertiti)" % path)
-        return {"files": {}, "origin": {}}
-    return data
+    return name + "_take" if name.lower() == "pacchetto" else name
 
 
 def collect_inputs(inputs):
@@ -123,7 +43,25 @@ def collect_inputs(inputs):
     return found, missing
 
 
-KNOWN_OPTIONS = ("--out=", "--sul-posto")
+def package_name(inputs):
+    if len(inputs) == 1 and os.path.isdir(inputs[0]):
+        base = os.path.basename(os.path.normpath(os.path.abspath(inputs[0])))
+    else:
+        base = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    return "Motive_" + safe_name(base) + ".zip"
+
+
+def write_package(path, takes):
+    """takes: list of (file name, take dict). Written to a temporary file first, then moved in place."""
+    tmp = path + ".tmp"
+    manifest = {"format": "motive-roblox-pacchetto", "version": 1,
+                "takes": [{"name": t["name"], "file": fn, "seconds": t["seconds"], "frames": t["frames"]}
+                          for fn, t in takes]}
+    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_STORED) as z:
+        z.writestr(MANIFEST, json.dumps(manifest, separators=(",", ":"), ensure_ascii=False))
+        for fn, take in takes:
+            z.writestr(fn, json.dumps(take, separators=(",", ":"), ensure_ascii=False))
+    os.replace(tmp, path)
 
 
 def main(argv):
@@ -133,65 +71,48 @@ def main(argv):
         return 2
     opts = dict(a[2:].split("=", 1) for a in argv if a.startswith("--") and "=" in a)
     travel = "--sul-posto" not in argv
-    inputs = [a for a in argv if not a.startswith("--")] or ["export_motive"]
-    out_dir = opts.get("out", "animazioni")
-    record_path = os.path.join(os.path.dirname(os.path.abspath(out_dir)), ".convertiti.json")
+    inputs = [a for a in argv if not a.startswith("--")]
+    if not inputs:
+        print("Trascina su Converti.bat la cartella degli export di Motive (o dei file .fbx).")
+        return 2
     fbx, missing = collect_inputs(inputs)
     for item in missing:
         print("ERRORE  %s: non e' una cartella ne' un file .fbx" % item)
-    if missing and not fbx:
+    if not fbx:
+        print("Nessun file .fbx da convertire.")
         return 2
-    os.makedirs(out_dir, exist_ok=True)
-    for fn in os.listdir(out_dir):  # leftovers of an interrupted run
-        if fn.endswith(".tmp"):
-            os.remove(os.path.join(out_dir, fn))
-    removed = update_removed(out_dir)
-    record = load_record(record_path)
-    failed = done = skipped = 0
-    seen = {}
+    takes, seen, failed = [], {}, len(missing)
     for src in fbx:
         fn = os.path.basename(src)
         stem = os.path.splitext(fn)[0]
         out_name = safe_name(stem) + ".json"
         try:
-            key = file_key(src)
-            done_as = record["files"].get(key)
-            if done_as and os.path.exists(os.path.join(out_dir, done_as)):
-                skipped += 1
-                continue
-            if out_name in removed:
-                print("tolta   %s: e' in %s, non la ripubblico" % (fn, REMOVED))
-                continue
             if out_name.lower() in seen:
-                raise FbxError("stesso nome di %s, convertito in questo giro: rinomina uno dei due" % seen[out_name.lower()])
-            folder = os.path.dirname(os.path.abspath(src))
-            replacing = os.path.exists(os.path.join(out_dir, out_name))
-            origin = record["origin"].get(out_name)
-            if replacing and origin and os.path.normcase(origin) != os.path.normcase(folder):
-                raise FbxError("esiste gia' una take con questo nome, da un'altra cartella (%s): rinomina l'FBX" % origin)
-            take = convert_one(src, stem, os.path.join(out_dir, out_name), travel)
+                raise FbxError("stesso nome di %s: rinomina uno dei due" % seen[out_name.lower()])
+            take = convert(load(src), stem, travel)
         except Exception as e:  # one bad file must not stop the others
             failed += 1
             print("ERRORE  %s: %s" % (src, e))
             continue
-        seen[out_name.lower()] = src
-        record["files"][key] = out_name
-        record["origin"][out_name] = folder
-        done += 1
-        print("%s %s  (%.1f s)" % ("sostituita" if replacing else "ok     ", fn, take["seconds"]))
-    write_json(record_path, record)
-    takes = build_index(out_dir)
-    if skipped:
-        print("\n%d FBX gia' convertiti in passato, saltati." % skipped)
-    print("\n%d convertite, %d con errori. Nell'elenco degli studenti: %d take." % (done, failed + len(missing), len(takes)))
-    return PARTIAL if failed or missing else 0
+        seen[out_name.lower()] = fn
+        takes.append((out_name, take))
+        print("ok      %s  (%.1f s)" % (fn, take["seconds"]))
+    if not takes:
+        print("\nNessuna take convertita: nessun pacchetto creato.")
+        return 2
+    out_dir = opts.get("out", DEFAULT_OUT)
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, package_name(inputs))
+    write_package(path, takes)
+    print("\n%d take nel pacchetto, %d file con errori.\nPACCHETTO: %s" % (len(takes), failed, os.path.abspath(path)))
+    return PARTIAL if failed else 0
 
 
 def run(argv):
     try:
         return main(argv)
     except Exception as e:
-        print("ERRORE imprevisto, niente viene pubblicato: %s: %s" % (type(e).__name__, e))
+        print("ERRORE imprevisto: %s: %s" % (type(e).__name__, e))
         return 3
 
 

@@ -11,6 +11,7 @@ import os
 import sys
 import tempfile
 import unittest
+import zipfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -77,8 +78,7 @@ class MathTests(unittest.TestCase):
     def test_safe_name(self):
         self.assertEqual(cli.safe_name("261106 Big T_001"), "261106_Big_T_001")
         self.assertEqual(cli.safe_name("***"), "take")
-        self.assertEqual(cli.safe_name("Index"), "Index_take")  # never overwrites index.json
-        self.assertEqual(cli.safe_name("tolte"), "tolte_take")
+        self.assertEqual(cli.safe_name("Pacchetto"), "Pacchetto_take")  # never overwrites pacchetto.json
 
     def test_align_opposite_directions(self):
         r = align([0, -1, 0], [0, 1, 0])
@@ -89,19 +89,15 @@ class MathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             self.assertEqual(cli.main(["--sul_posto", "--out=" + os.path.join(d, "out"), d]), 2)
 
-    def test_index_ignores_foreign_json_and_leftovers(self):
+    def test_nothing_to_package(self):
         with tempfile.TemporaryDirectory() as d:
-            src, out = os.path.join(d, "in"), os.path.join(d, "out")
-            os.makedirs(src)
-            os.makedirs(out)
-            for name, body in (("lista.json", "[1, 2]"), ("rotto.json", "{"), ("vecchio.json.tmp", "x"),
-                               ("senza.json", '{"format": "motive-roblox", "name": "x"}')):
-                with open(os.path.join(out, name), "w", encoding="utf-8") as f:
-                    f.write(body)
-            self.assertEqual(cli.main(["--out=" + out, src]), 0)
-            with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
-                self.assertEqual(json.load(f)["takes"], [])
-            self.assertNotIn("vecchio.json.tmp", os.listdir(out))
+            out = os.path.join(d, "out")
+            self.assertEqual(cli.main(["--out=" + out]), 2)  # double click: nothing dragged
+            self.assertEqual(cli.main(["--out=" + out, d]), 2)  # a folder without FBX
+            with open(os.path.join(d, "rotto.fbx"), "wb") as f:
+                f.write(b"not an fbx")
+            self.assertEqual(cli.main(["--out=" + out, d]), 2)  # only broken files: no package
+            self.assertFalse(os.path.exists(out) and os.listdir(out))
 
     def test_corrupt_fbx_is_reported(self):
         with tempfile.TemporaryDirectory() as d:
@@ -168,16 +164,6 @@ class EndToEndTests(unittest.TestCase):
         self.assertEqual(other["frames"], self.take["frames"])
         self.assertEqual(other["rot"][:60], self.take["rot"][:60])
 
-    def test_name_collision_is_reported(self):
-        with tempfile.TemporaryDirectory() as d:
-            src, out = os.path.join(d, "in"), os.path.join(d, "out")
-            os.makedirs(src)
-            for name in ("Take 1.fbx", "Take.1.fbx"):
-                shutil.copy(SAMPLE, os.path.join(src, name))
-            self.assertEqual(cli.main(["--out=" + out, src]), cli.PARTIAL)
-            with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
-                self.assertEqual([t["name"] for t in json.load(f)["takes"]], ["Take 1"])
-
     def test_unsupported_settings_on_intermediate_bones(self):
         for setting in ("pre", "scale"):
             broken = copy.deepcopy(self.skel)
@@ -200,82 +186,6 @@ class EndToEndTests(unittest.TestCase):
         other = convert(pref, "pref")
         self.assertEqual(other["rot"][:40], self.take["rot"][:40])
 
-    def test_cli_drag_and_drop_flow(self):
-        with tempfile.TemporaryDirectory() as d:
-            motive, out = os.path.join(d, "Motive export"), os.path.join(d, "repo", "animazioni")
-            os.makedirs(os.path.join(motive, "sottocartella"))
-            shutil.copy(SAMPLE, os.path.join(motive, "My Take.fbx"))
-            shutil.copy(SAMPLE, os.path.join(motive, "sottocartella", "ignorata.fbx"))  # subfolders are not read
-            with open(os.path.join(motive, "broken.fbx"), "wb") as b:
-                b.write(b"not an fbx")
-            single = os.path.join(d, "Singola.fbx")
-            shutil.copy(SAMPLE, single)
-
-            def index():
-                with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
-                    return [t["name"] for t in json.load(f)["takes"]]
-
-            # a dragged folder plus a dragged file: the broken file is reported, the good ones converted
-            self.assertEqual(cli.main(["--out=" + out, motive, single]), cli.PARTIAL)
-            self.assertEqual(index(), ["My Take", "Singola"])
-            self.assertEqual(sorted(os.listdir(motive)), ["My Take.fbx", "broken.fbx", "sottocartella"])  # nothing moved
-            self.assertTrue(os.path.isfile(os.path.join(d, "repo", ".convertiti.json")))
-            # second run: already converted files are skipped, a deleted take is not recreated
-            os.remove(os.path.join(motive, "broken.fbx"))
-            os.remove(os.path.join(out, "My_Take.json"))
-            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
-            self.assertEqual(index(), ["Singola"])
-            # a re-exported file (new date) is converted again; a removed take stays out (tolte.json)
-            for path in (os.path.join(motive, "My Take.fbx"), single):
-                st = os.stat(path)
-                os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
-            self.assertEqual(cli.main(["--out=" + out, motive, single]), 0)
-            self.assertEqual(index(), ["Singola"])
-            # back on purpose: drop it from tolte.json
-            with open(os.path.join(out, "tolte.json"), "w", encoding="utf-8") as f:
-                json.dump({"format": "motive-roblox-tolte", "version": 1, "takes": []}, f)
-            st = os.stat(os.path.join(motive, "My Take.fbx"))
-            os.utime(os.path.join(motive, "My Take.fbx"), ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
-            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
-            self.assertEqual(index(), ["My Take", "Singola"])
-            # same name from another session folder: refused, the published take is kept
-            other = os.path.join(d, "Altra sessione")
-            os.makedirs(other)
-            shutil.copy(os.path.join(motive, "My Take.fbx"), os.path.join(other, "My Take.fbx"))
-            st = os.stat(os.path.join(other, "My Take.fbx"))
-            os.utime(os.path.join(other, "My Take.fbx"), ns=(st.st_atime_ns, st.st_mtime_ns + 5 * 10 ** 9))
-            self.assertEqual(cli.main(["--out=" + out, other]), cli.PARTIAL)
-            self.assertEqual(index(), ["My Take", "Singola"])
-            # something that is neither a folder nor an .fbx: stop
-            self.assertEqual(cli.main(["--out=" + out, os.path.join(d, "non esiste")]), 2)
-
-    def test_removed_take_does_not_come_back_from_another_pc(self):
-        with tempfile.TemporaryDirectory() as d:
-            motive, out = os.path.join(d, "export"), os.path.join(d, "repo", "animazioni")
-            os.makedirs(motive)
-            shutil.copy(SAMPLE, os.path.join(motive, "Brutta.fbx"))
-            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
-            os.remove(os.path.join(out, "Brutta.json"))  # the teacher removes the take
-            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
-            os.remove(os.path.join(d, "repo", ".convertiti.json"))  # another PC: no local record
-            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
-            with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
-                self.assertEqual(json.load(f)["takes"], [])
-            with open(os.path.join(out, "tolte.json"), encoding="utf-8") as f:
-                self.assertEqual(json.load(f)["takes"], ["Brutta.json"])
-
-    def test_take_lost_without_removal_is_converted_again(self):
-        """After 'git reset --hard' an unpublished take file is gone but the local record still lists its FBX."""
-        with tempfile.TemporaryDirectory() as d:
-            motive, out = os.path.join(d, "export"), os.path.join(d, "repo", "animazioni")
-            os.makedirs(motive)
-            shutil.copy(SAMPLE, os.path.join(motive, "Persa.fbx"))
-            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
-            os.remove(os.path.join(out, "Persa.json"))  # gone, and not listed in the index either
-            os.remove(os.path.join(out, "index.json"))
-            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
-            self.assertTrue(os.path.exists(os.path.join(out, "Persa.json")))
-
     def test_rotation_pivot_is_refused(self):
         broken = copy.deepcopy(self.skel)
         hips = broken.by_name["Hips"]
@@ -283,6 +193,41 @@ class EndToEndTests(unittest.TestCase):
         with self.assertRaises(FbxError) as e:
             convert(broken, "x")
         self.assertIn("RotationPivot", str(e.exception))
+
+    def test_package_from_dragged_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            motive, out = os.path.join(d, "Sessione 261106"), os.path.join(d, "pacchetti")
+            os.makedirs(os.path.join(motive, "sottocartella"))
+            shutil.copy(SAMPLE, os.path.join(motive, "My Take.fbx"))
+            shutil.copy(SAMPLE, os.path.join(motive, "Take.1.fbx"))
+            shutil.copy(SAMPLE, os.path.join(motive, "Take 1.fbx"))  # same file name as Take.1 once cleaned
+            shutil.copy(SAMPLE, os.path.join(motive, "sottocartella", "ignorata.fbx"))  # subfolders are not read
+            with open(os.path.join(motive, "broken.fbx"), "wb") as b:
+                b.write(b"not an fbx")
+            self.assertEqual(cli.main(["--out=" + out, motive]), cli.PARTIAL)
+            path = os.path.join(out, "Motive_Sessione_261106.zip")
+            self.assertEqual(os.listdir(out), ["Motive_Sessione_261106.zip"])
+            with zipfile.ZipFile(path) as z:
+                self.assertTrue(all(i.compress_type == zipfile.ZIP_STORED for i in z.infolist()))
+                manifest = json.loads(z.read("pacchetto.json"))
+                self.assertEqual(manifest["format"], "motive-roblox-pacchetto")
+                self.assertEqual([t["name"] for t in manifest["takes"]], ["My Take", "Take 1"])
+                for t in manifest["takes"]:
+                    take = json.loads(z.read(t["file"]))
+                    self.assertEqual((take["name"], take["frames"]), (t["name"], t["frames"]))
+            self.assertEqual(sorted(os.listdir(motive)),  # the FBX are not touched
+                             ["My Take.fbx", "Take 1.fbx", "Take.1.fbx", "broken.fbx", "sottocartella"])
+
+    def test_package_from_several_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            a, b, out = os.path.join(d, "A.fbx"), os.path.join(d, "B.fbx"), os.path.join(d, "pacchetti")
+            shutil.copy(SAMPLE, a)
+            shutil.copy(SAMPLE, b)
+            self.assertEqual(cli.main(["--out=" + out, a, b, "--sul-posto"]), 0)
+            (name,) = os.listdir(out)
+            self.assertRegex(name, r"^Motive_\d{8}_\d{4}\.zip$")
+            with zipfile.ZipFile(os.path.join(out, name)) as z:
+                self.assertEqual(sorted(z.namelist()), ["A.json", "B.json", "pacchetto.json"])
 
 
 if __name__ == "__main__":

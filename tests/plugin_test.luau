@@ -1,21 +1,21 @@
 --[[
 Test of the plugin core in Roblox Studio (edit mode).
 
-1. python tools/build_plugin.py   -> build/MotiveAnimazioni_modulo.rbxmx
-2. Drag that file into Studio and move the ModuleScript "MotiveAnimazioni" into ServerStorage.
+1. python tools/build_plugin.py                          -> build/MotiveAnimazioni_modulo.rbxmx
+   python tools/build_test_package.py <261106_GorillaWave_T_001.fbx>   -> build/MotiveTestData.rbxmx
+2. Drag both files into Studio and move the ModuleScripts "MotiveAnimazioni" and "MotiveTestData" into ServerStorage.
 3. Paste this file into the Command Bar (or run it through the Studio MCP execute_luau) and run it.
-   The takes come from the master branch; to test a branch before merging it, first run
-   _G.MotiveTestBranch = "<branch>" in the Command Bar.
-It downloads takes from GitHub, adapts them to a classic R15 and to an R15 Plus avatar created on the fly,
-compares the arm directions with the values measured on the Motive skeleton, checks the student errors, and
-removes everything it created. Prints PASS or the failures.
+It opens the same package in four zip variants (stored, deflated, macOS style) and as a loose .json, adapts the
+take to a classic R15 and to an R15 Plus avatar created on the fly, compares the arm directions with the values
+measured on the Motive skeleton, checks multi-avatar selection, duplicates and the student errors, and removes
+everything it created. Prints PASS or the failures.
 ]]
 
-local HttpService = game:GetService("HttpService")
 local ServerStorage = game:GetService("ServerStorage")
+local Selection = game:GetService("Selection")
 local Motive = require(ServerStorage:WaitForChild("MotiveAnimazioni"))
-local BASE = "https://raw.githubusercontent.com/TechNABA/motive-roblox/" .. (_G.MotiveTestBranch or "master")
-	.. "/animazioni/"
+local DATA = require(ServerStorage:WaitForChild("MotiveTestData"))
+local TAKE = "261106_GorillaWave_T_001"
 
 local failures = {}
 local function check(cond: boolean, what: string)
@@ -26,7 +26,27 @@ local function studentError(f, ...)
 	return (not ok) and type(err) == "table" and err.student or nil
 end
 
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local function fromBase64(s: string): string
+	local map = {}
+	for i = 1, 64 do map[B64:byte(i)] = i - 1 end
+	local out, acc, nbits = {}, 0, 0
+	for i = 1, #s do
+		local v = map[s:byte(i)]
+		if v then
+			acc = bit32.bor(bit32.lshift(bit32.band(acc, 0xFFFF), 6), v)
+			nbits += 6
+			if nbits >= 8 then
+				nbits -= 8
+				table.insert(out, string.char(bit32.band(bit32.rshift(acc, nbits), 255)))
+			end
+		end
+	end
+	return table.concat(out)
+end
+
 local hadSaves = ServerStorage:FindFirstChild("RBX_ANIMSAVES") ~= nil
+local oldSelection = Selection:Get()
 local created = {}
 
 local function jointPos(rig, name)
@@ -39,9 +59,36 @@ local function jointPos(rig, name)
 end
 
 local ok, err = pcall(function()
-	local index = HttpService:JSONDecode(HttpService:GetAsync(BASE .. "index.json", true))
-	check(type(index.takes) == "table" and #index.takes > 0, "index.json has no takes")
-	local gw = HttpService:JSONDecode(HttpService:GetAsync(BASE .. "261106_GorillaWave_T_001.json", true))
+	-- the same package in every zip variant gives the same take
+	local reference
+	for _, variant in { "stored", "deflate9", "deflate0", "mac" } do
+		local okRead, takes = pcall(Motive.readTakes, { { name = "pacchetto.zip", contents = fromBase64(DATA[variant]) } })
+		if not okRead then
+			check(false, variant .. ": " .. tostring(type(takes) == "table" and takes.student or takes))
+			continue
+		end
+		check(#takes == 1 and takes[1].name == TAKE, variant .. ": wrong takes")
+		local data = takes[1].data
+		if not reference then
+			reference = data
+		else
+			check(#data.rot == #reference.rot and data.rot[1234] == reference.rot[1234]
+				and data.root[#data.root] == reference.root[#reference.root], variant .. ": data differs from the stored zip")
+		end
+	end
+	local gw = reference
+
+	-- loose .json takes (a Mac may unpack the zip by itself)
+	local files = Motive.readZip(fromBase64(DATA.stored))
+	local loose = Motive.readTakes({ { name = TAKE .. ".json", contents = files[TAKE .. ".json"] } })
+	check(#loose == 1 and loose[1].name == TAKE, "loose .json not read")
+
+	-- files that are not packages
+	check(studentError(Motive.readTakes, { { name = "x.zip", contents = "not a zip at all" } }) ~= nil, "garbage zip not refused")
+	local broken = fromBase64(DATA.deflate9)
+	broken = broken:sub(1, 200) .. string.rep("\255", 300) .. broken:sub(501)
+	check(studentError(Motive.readTakes, { { name = "x.zip", contents = broken } }) ~= nil, "damaged zip not refused")
+	check(studentError(Motive.readTakes, { { name = "x.json", contents = "{}" } }) ~= nil, "empty json not refused")
 
 	local plus = game:GetService("Players"):CreateHumanoidModelFromDescription(Instance.new("HumanoidDescription"), Enum.HumanoidRigType.R15)
 	local classic = game:GetObjects("rbxasset://avatar/characterR15.rbxm")[1]
@@ -54,19 +101,25 @@ local ok, err = pcall(function()
 		if not rig.Humanoid:FindFirstChildOfClass("Animator") then Instance.new("Animator", rig.Humanoid) end
 	end
 
+	-- multi-avatar selection
+	Selection:Set({ created[1].Head, created[2] })
+	local picked = Motive.pickRigs()
+	check(#picked == 2 and table.find(picked, created[1]) ~= nil and table.find(picked, created[2]) ~= nil,
+		"selection of two avatars")
+
 	-- expected at t = 3 s, measured on the Motive skeleton (Roblox axes)
 	local expectUA, expectFA = Vector3.new(-0.81, 0.27, -0.51), Vector3.new(0.59, -0.77, 0.25)
-	for _, rig in created do
+	for _, rig in { created[1], created[2] } do
 		for _, d in rig:GetDescendants() do
 			if d:IsA("Motor6D") or d:IsA("AnimationConstraint") then d.Transform = CFrame.identity end
 		end
 		local seg = (jointPos(rig, "LeftHand") - jointPos(rig, "LeftLowerArm")).Unit
 		local ua = rig.LeftUpperArm.CFrame:VectorToObjectSpace(seg)
 		local fa = rig.LeftLowerArm.CFrame:VectorToObjectSpace(seg)
+		check(Motive.findSaved(rig, gw.name) == nil, rig.Name .. ": take found before saving")
 		local ks = Motive.saveTake(rig, Motive.buildTake(rig, gw), gw.name)
 		check(ks.Parent == rig.AnimSaves.Value, rig.Name .. ": take not saved under AnimSaves")
-		local again = Motive.saveTake(rig, Motive.buildTake(rig, gw), gw.name)
-		check(again.Name == gw.name .. " (2)", rig.Name .. ": second save overwrote the first")
+		check(Motive.findSaved(rig, gw.name) == ks, rig.Name .. ": saved take not found (duplicate check would fail)")
 		local anim = Instance.new("Animation")
 		anim.AnimationId = game:GetService("KeyframeSequenceProvider"):RegisterKeyframeSequence(ks)
 		local animator = rig.Humanoid:FindFirstChildOfClass("Animator")
@@ -84,27 +137,16 @@ local ok, err = pcall(function()
 		track:Stop(0)
 	end
 
-	local bad = table.clone(gw)
-	bad.fps = 0
-	check(studentError(Motive.buildTake, created[1], bad) ~= nil, "fps 0 not rejected")
-	check(studentError(Motive.buildTake, created[1], { format = "x" }) ~= nil, "foreign file not rejected")
-	local otherTree = table.clone(gw)
-	otherTree.parents = table.clone(gw.parents)
-	otherTree.parents[table.find(gw.parts, "Head")] = "LowerTorso"
-	check(studentError(Motive.buildTake, created[1], otherTree) ~= nil, "different hierarchy not rejected")
 	-- a duplicated avatar (Ctrl+D) copies AnimSaves pointing at the original's holder: it must get its own
 	local copy = created[2]:Clone()
 	table.insert(created, copy)
 	copy.Name = "MotiveTestCopia"
 	copy.Parent = workspace
+	check(Motive.findSaved(copy, gw.name) == nil, "duplicated avatar sees the original's take")
 	local ksCopy = Motive.saveTake(copy, Motive.buildTake(copy, gw), gw.name)
 	check(ksCopy.Parent ~= created[2].AnimSaves.Value and ksCopy.Parent:IsA("ObjectValue") and ksCopy.Parent.Value == copy,
 		"duplicated avatar saved into the original's slot")
-	-- download errors seen by the student
-	local gone = studentError(Motive.httpGetJson, Motive.BASE_URL .. "non-esiste-davvero.json", "sparita: Aggiorna elenco")
-	check(gone ~= nil and gone:find("Aggiorna elenco") ~= nil, "missing take (404) message: " .. tostring(gone))
-	local offline = studentError(Motive.httpGetJson, "https://motive-roblox-test.invalid/index.json", "x")
-	check(offline ~= nil and offline:find("connessione") ~= nil, "no network message: " .. tostring(offline))
+
 	-- a joint hanging on a part that is not R15 (custom rig): clear message, no Lua error
 	local odd = created[2]:Clone()
 	table.insert(created, odd)
@@ -118,6 +160,19 @@ local ok, err = pcall(function()
 	end
 	local oddMsg = studentError(Motive.buildTake, odd, gw)
 	check(oddMsg ~= nil and oddMsg:find("non standard") ~= nil, "joint on an extra part: " .. tostring(oddMsg))
+
+	-- take files that are not right
+	local bad = table.clone(gw)
+	bad.fps = 0
+	check(studentError(Motive.buildTake, created[1], bad) ~= nil, "fps 0 not rejected")
+	local newer = table.clone(gw)
+	newer.version = 2
+	local newerMsg = studentError(Motive.buildTake, created[1], newer)
+	check(newerMsg ~= nil and newerMsg:find("aggiorna il plugin") ~= nil, "newer format message")
+	local otherTree = table.clone(gw)
+	otherTree.parents = table.clone(gw.parents)
+	otherTree.parents[table.find(gw.parts, "Head")] = "LowerTorso"
+	check(studentError(Motive.buildTake, created[1], otherTree) ~= nil, "different hierarchy not rejected")
 	local orphan = Motive.buildTake(created[1], gw)
 	created[1].Parent = nil
 	check(studentError(Motive.saveTake, created[1], orphan, "x") ~= nil, "removed avatar not reported")
@@ -126,6 +181,7 @@ if not ok then
 	table.insert(failures, "error: " .. tostring(type(err) == "table" and err.student or err))
 end
 
+Selection:Set(oldSelection)
 local saves = ServerStorage:FindFirstChild("RBX_ANIMSAVES")
 if saves then
 	for _, holder in saves:GetChildren() do -- only the entries of the test avatars
