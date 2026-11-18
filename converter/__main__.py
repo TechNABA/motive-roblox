@@ -1,10 +1,14 @@
 """Convert Motive FBX exports into the take files the Roblox plugin reads.
 
-Usage: python -m converter [--out=animazioni] [--registro=FILE] [--sul-posto] [folder or .fbx ...]
+Usage: python -m converter [--out=animazioni] [--sul-posto] [folder or .fbx ...]
 Inputs are folders (their .fbx files, not subfolders) or single .fbx files; default: export_motive.
-The FBX files are never moved: a local record (default .convertiti.json next to the output folder) remembers which
-ones are already converted (name, size, date), so they are skipped next time, a re-exported file is converted
-again, and a take deleted from the output is not recreated. The index (index.json) is always rebuilt.
+
+- The FBX files are never moved. A local record (.convertiti.json next to the output folder, not in Git) remembers
+  which ones are already converted (name, size, date): they are skipped, a re-exported file is converted again.
+- A take removed by deleting its .json is listed in tolte.json (published with the takes), so no PC converts it again.
+- index.json (the list the students see) is rebuilt on every run.
+
+Exit codes: 0 all fine, 10 some files rejected (the others can be published); anything else: publish nothing.
 """
 import json
 import os
@@ -15,11 +19,13 @@ from .fbx_reader import FbxError, load
 from .retarget import convert
 
 INDEX = "index.json"
+REMOVED = "tolte.json"
+PARTIAL = 10
 
 
 def safe_name(stem):
     name = re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_") or "take"
-    return name + "_take" if name.lower() == "index" else name
+    return name + "_take" if name.lower() in ("index", "tolte") else name
 
 
 def write_json(path, data):
@@ -29,13 +35,17 @@ def write_json(path, data):
     os.replace(tmp, path)
 
 
-def read_take_header(path):
-    """Name, seconds and frames of a take file, or None if the file is not a take."""
+def read_json(path, default):
     try:
         with open(path, encoding="utf-8") as f:
-            d = json.load(f)
+            return json.load(f)
     except (OSError, ValueError):
-        return None
+        return default
+
+
+def read_take_header(path):
+    """Name, seconds and frames of a take file, or None if the file is not a take."""
+    d = read_json(path, None)
     if not isinstance(d, dict) or d.get("format") != "motive-roblox":
         return None
     name, seconds, frames = d.get("name"), d.get("seconds"), d.get("frames")
@@ -47,7 +57,7 @@ def read_take_header(path):
 def build_index(out_dir):
     takes = []
     for fn in sorted(os.listdir(out_dir)):
-        if not fn.endswith(".json") or fn.lower() == INDEX:
+        if not fn.endswith(".json") or fn.lower() in (INDEX, REMOVED):
             continue
         head = read_take_header(os.path.join(out_dir, fn))
         if head:
@@ -55,6 +65,19 @@ def build_index(out_dir):
     takes.sort(key=lambda t: t["name"].lower())
     write_json(os.path.join(out_dir, INDEX), {"format": "motive-roblox-index", "version": 1, "takes": takes})
     return takes
+
+
+def update_removed(out_dir):
+    """Takes listed in the last published index whose file is gone were removed on purpose: remember them."""
+    path = os.path.join(out_dir, REMOVED)
+    removed = read_json(path, {})
+    files = set(removed.get("takes", [])) if isinstance(removed, dict) else set()
+    index = read_json(os.path.join(out_dir, INDEX), {})
+    for t in index.get("takes", []) if isinstance(index, dict) else []:
+        if isinstance(t, dict) and isinstance(t.get("file"), str) and not os.path.exists(os.path.join(out_dir, t["file"])):
+            files.add(t["file"])
+    write_json(path, {"format": "motive-roblox-tolte", "version": 1, "takes": sorted(files)})
+    return files
 
 
 def convert_one(src, stem, out_path, travel):
@@ -77,17 +100,12 @@ def file_key(path):
 
 def load_record(path):
     """{"files": {fbx key: take file}, "origin": {take file: folder of its FBX}}"""
-    empty = {"files": {}, "origin": {}}
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return empty
-    except (OSError, ValueError):
-        data = None
+    if not os.path.exists(path):
+        return {"files": {}, "origin": {}}
+    data = read_json(path, None)
     if not (isinstance(data, dict) and isinstance(data.get("files"), dict) and isinstance(data.get("origin"), dict)):
         print("ATTENZIONE: il registro %s e' illeggibile, lo ricreo (gli FBX verranno riconvertiti)" % path)
-        return empty
+        return {"files": {}, "origin": {}}
     return data
 
 
@@ -110,7 +128,7 @@ def main(argv):
     travel = "--sul-posto" not in argv
     inputs = [a for a in argv if not a.startswith("--")] or ["export_motive"]
     out_dir = opts.get("out", "animazioni")
-    record_path = opts.get("registro", os.path.join(os.path.dirname(os.path.abspath(out_dir)), ".convertiti.json"))
+    record_path = os.path.join(os.path.dirname(os.path.abspath(out_dir)), ".convertiti.json")
     fbx, missing = collect_inputs(inputs)
     for item in missing:
         print("ERRORE  %s: non e' una cartella ne' un file .fbx" % item)
@@ -120,18 +138,22 @@ def main(argv):
     for fn in os.listdir(out_dir):  # leftovers of an interrupted run
         if fn.endswith(".tmp"):
             os.remove(os.path.join(out_dir, fn))
+    removed = update_removed(out_dir)
     record = load_record(record_path)
     failed = done = skipped = 0
     seen = {}
     for src in fbx:
         fn = os.path.basename(src)
         stem = os.path.splitext(fn)[0]
+        out_name = safe_name(stem) + ".json"
         try:
             key = file_key(src)
             if key in record["files"]:
                 skipped += 1
                 continue
-            out_name = safe_name(stem) + ".json"
+            if out_name in removed:
+                print("tolta   %s: e' in %s, non la ripubblico" % (fn, REMOVED))
+                continue
             if out_name.lower() in seen:
                 raise FbxError("stesso nome di %s, convertito in questo giro: rinomina uno dei due" % seen[out_name.lower()])
             folder = os.path.dirname(os.path.abspath(src))
@@ -154,11 +176,10 @@ def main(argv):
     if skipped:
         print("\n%d FBX gia' convertiti in passato, saltati." % skipped)
     print("\n%d convertite, %d con errori. Nell'elenco degli studenti: %d take." % (done, failed + len(missing), len(takes)))
-    return 1 if failed or missing else 0
+    return PARTIAL if failed or missing else 0
 
 
 def run(argv):
-    """Exit codes: 0 all converted, 1 some files rejected (the others are fine to publish), >= 2 stop, publish nothing."""
     try:
         return main(argv)
     except Exception as e:

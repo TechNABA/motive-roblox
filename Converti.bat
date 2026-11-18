@@ -3,7 +3,16 @@ rem Converte gli FBX di Motive e pubblica le take per gli studenti.
 rem Trascina su questo file (o su un suo collegamento) la cartella degli export di Motive, o dei file .fbx;
 rem con il doppio clic usa la cartella export_motive.
 setlocal
-cd /d "%~dp0"
+
+rem The update from GitHub may rewrite this very file while cmd is reading it: run from a temporary copy.
+rem The call, the cleanup and the exit are on one line, which cmd reads whole before running it.
+if defined MOTIVE_REPO goto avviato
+set "MOTIVE_REPO=%~dp0"
+set "MOTIVE_COPIA=%TEMP%\motive-converti-%RANDOM%%RANDOM%.bat"
+copy /y "%~f0" "%MOTIVE_COPIA%" >nul
+call "%MOTIVE_COPIA%" %* & del "%MOTIVE_COPIA%" >nul 2>&1 & exit /b
+:avviato
+cd /d "%MOTIVE_REPO%"
 
 rem "where python" also finds the Windows Store stub: check that Python really runs; python.org installs "py"
 set PY=python
@@ -34,12 +43,8 @@ if errorlevel 1 (
     goto fine
 )
 rem takes removed by hand are recorded first, so the rebase cannot lose them in the autostash
-git add animazioni
-git diff --cached --quiet -- animazioni
-if errorlevel 1 (
-    git commit --quiet -m "Aggiorna le take" -- animazioni >nul 2>&1
-    if errorlevel 1 goto noidentity
-)
+call :registra
+if errorlevel 1 goto noidentity
 rem index.json is rebuilt by the converter: on a conflict keep either side (.gitattributes: merge=ours)
 git config merge.ours.driver true
 git rebase --quiet --autostash origin/master >nul 2>&1
@@ -52,21 +57,23 @@ if not "%REBASE%"=="0" (
     echo Questa cartella e GitHub hanno modifiche diverse alle stesse take.
     echo Per ripartire da GitHub, apri un terminale in questa cartella e scrivi:
     echo     git reset --hard origin/master
-    echo poi cancella il file .convertiti.json in questa cartella e trascina di nuovo gli FBX da ripubblicare.
+    echo poi trascina di nuovo gli FBX da ripubblicare.
     goto fine
 )
 
 echo.
 echo Converto gli FBX...
 %PY% -m converter %*
-if errorlevel 2 goto fine
-
-git add animazioni
-git diff --cached --quiet -- animazioni
-if errorlevel 1 (
-    git commit --quiet -m "Aggiorna le take" -- animazioni
-    if errorlevel 1 goto noidentity
+rem 0 = all converted, 10 = some files rejected (the others are published); anything else = stop
+set RC=%errorlevel%
+if not "%RC%"=="0" if not "%RC%"=="10" (
+    echo.
+    echo La conversione si e' interrotta: non pubblico niente.
+    goto fine
 )
+
+call :registra
+if errorlevel 1 goto noidentity
 set AHEAD=0
 for /f %%n in ('git rev-list --count origin/master..HEAD') do set AHEAD=%%n
 if "%AHEAD%"=="0" (
@@ -83,8 +90,15 @@ if errorlevel 1 (
 )
 echo.
 echo Pubblicato. Gli studenti vedono le take nuove con "Aggiorna elenco" nel plugin (entro qualche minuto).
-
 goto fine
+
+rem Commit the changes in animazioni, if any. errorlevel 1 = the commit failed.
+:registra
+git add animazioni
+git diff --cached --quiet -- animazioni
+if not errorlevel 1 exit /b 0
+git commit --quiet -m "Aggiorna le take" -- animazioni >nul 2>&1
+exit /b %errorlevel%
 
 :noidentity
 echo.

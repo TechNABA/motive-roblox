@@ -4,6 +4,8 @@ Test of the plugin core in Roblox Studio (edit mode).
 1. python tools/build_plugin.py   -> build/MotiveAnimazioni_modulo.rbxmx
 2. Drag that file into Studio and move the ModuleScript "MotiveAnimazioni" into ServerStorage.
 3. Paste this file into the Command Bar (or run it through the Studio MCP execute_luau) and run it.
+   The takes come from the master branch; to test a branch before merging it, first run
+   _G.MotiveTestBranch = "<branch>" in the Command Bar.
 It downloads takes from GitHub, adapts them to a classic R15 and to an R15 Plus avatar created on the fly,
 compares the arm directions with the values measured on the Motive skeleton, checks the student errors, and
 removes everything it created. Prints PASS or the failures.
@@ -12,7 +14,8 @@ removes everything it created. Prints PASS or the failures.
 local HttpService = game:GetService("HttpService")
 local ServerStorage = game:GetService("ServerStorage")
 local Motive = require(ServerStorage:WaitForChild("MotiveAnimazioni"))
-local BASE = "https://raw.githubusercontent.com/TechNABA/motive-roblox/master/animazioni/"
+local BASE = "https://raw.githubusercontent.com/TechNABA/motive-roblox/" .. (_G.MotiveTestBranch or "master")
+	.. "/animazioni/"
 
 local failures = {}
 local function check(cond: boolean, what: string)
@@ -43,12 +46,12 @@ local ok, err = pcall(function()
 	local plus = game:GetService("Players"):CreateHumanoidModelFromDescription(Instance.new("HumanoidDescription"), Enum.HumanoidRigType.R15)
 	local classic = game:GetObjects("rbxasset://avatar/characterR15.rbxm")[1]
 	for i, rig in { plus, classic } do
+		table.insert(created, rig) -- first, so the cleanup removes it whatever fails next
 		rig.Name = "MotiveTest" .. i
 		rig:PivotTo(CFrame.new(500 + 20 * i, 5, 0))
 		rig.Parent = workspace
 		rig.HumanoidRootPart.Anchored = true
 		if not rig.Humanoid:FindFirstChildOfClass("Animator") then Instance.new("Animator", rig.Humanoid) end
-		table.insert(created, rig)
 	end
 
 	-- expected at t = 3 s, measured on the Motive skeleton (Roblox axes)
@@ -91,12 +94,17 @@ local ok, err = pcall(function()
 	check(studentError(Motive.buildTake, created[1], otherTree) ~= nil, "different hierarchy not rejected")
 	-- a duplicated avatar (Ctrl+D) copies AnimSaves pointing at the original's holder: it must get its own
 	local copy = created[2]:Clone()
+	table.insert(created, copy)
 	copy.Name = "MotiveTestCopia"
 	copy.Parent = workspace
-	table.insert(created, copy)
 	local ksCopy = Motive.saveTake(copy, Motive.buildTake(copy, gw), gw.name)
 	check(ksCopy.Parent ~= created[2].AnimSaves.Value and ksCopy.Parent:IsA("ObjectValue") and ksCopy.Parent.Value == copy,
 		"duplicated avatar saved into the original's slot")
+	-- download errors seen by the student
+	local gone = studentError(Motive.httpGetJson, Motive.BASE_URL .. "non-esiste-davvero.json")
+	check(gone ~= nil and gone:find("Aggiorna elenco") ~= nil, "missing take (404) message: " .. tostring(gone))
+	local offline = studentError(Motive.httpGetJson, "https://motive-roblox-test.invalid/index.json")
+	check(offline ~= nil and offline:find("connessione") ~= nil, "no network message: " .. tostring(offline))
 	local orphan = Motive.buildTake(created[1], gw)
 	created[1].Parent = nil
 	check(studentError(Motive.saveTake, created[1], orphan, "x") ~= nil, "removed avatar not reported")

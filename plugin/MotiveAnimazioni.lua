@@ -315,8 +315,12 @@ local function httpGetJson(url: string)
 	end)
 	if not ok then
 		local msg = tostring(res)
-		if msg:lower():find("permission") or msg:lower():find("not allowed") or msg:lower():find("denied") then
+		local low = msg:lower()
+		if low:find("permission") or low:find("not allowed") or low:find("denied") then
 			fail("Studio non lascia scaricare le animazioni.\nVai in Plugins > Manage Plugins, apri 'Animazioni Motive' e consenti l'accesso a raw.githubusercontent.com.")
+		end
+		if low:find("404") then
+			fail("Questa animazione non c'e' piu': clicca Aggiorna elenco.")
 		end
 		fail("Non riesco a scaricare le animazioni: controlla la connessione a internet e riprova.\n(" .. msg .. ")")
 	end
@@ -329,7 +333,7 @@ end
 
 local Motive = {
 	VERSION = VERSION, describeRig = describeRig, readTake = readTake, buildTake = buildTake, saveTake = saveTake,
-	animSavesFolder = animSavesFolder, pickRig = pickRig,
+	animSavesFolder = animSavesFolder, pickRig = pickRig, httpGetJson = httpGetJson, BASE_URL = BASE_URL,
 }
 
 if not plugin then
@@ -364,7 +368,8 @@ root.BorderSizePixel = 0
 root.Parent = widget
 
 local status = Instance.new("TextLabel")
-status.Size = UDim2.new(1, -16, 0, 96)
+status.Size = UDim2.new(1, -16, 0, 0)
+status.AutomaticSize = Enum.AutomaticSize.Y -- long messages push the button and the list down
 status.Position = UDim2.fromOffset(8, 8)
 status.BackgroundTransparency = 1
 status.TextWrapped = true
@@ -376,15 +381,15 @@ status.Parent = root
 
 local refresh = Instance.new("TextButton")
 refresh.Size = UDim2.new(1, -16, 0, 30)
-refresh.Position = UDim2.fromOffset(8, 108)
+refresh.Position = UDim2.fromOffset(8, 40)
 refresh.Font = Enum.Font.SourceSans
 refresh.TextSize = 16
 refresh.Text = "Aggiorna elenco"
 refresh.Parent = root
 
 local list = Instance.new("ScrollingFrame")
-list.Size = UDim2.new(1, -16, 1, -176)
-list.Position = UDim2.fromOffset(8, 146)
+list.Size = UDim2.new(1, -16, 1, -106)
+list.Position = UDim2.fromOffset(8, 78)
 list.BorderSizePixel = 0
 list.ScrollBarThickness = 8
 list.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -405,13 +410,27 @@ footer.TextXAlignment = Enum.TextXAlignment.Left
 footer.Text = "versione " .. VERSION
 footer.Parent = root
 
+-- the button and the list sit right below the message, whatever its height
+local function relayout()
+	local y = 8 + status.AbsoluteSize.Y + 8
+	refresh.Position = UDim2.fromOffset(8, y)
+	list.Position = UDim2.fromOffset(8, y + 38)
+	list.Size = UDim2.new(1, -16, 1, -(y + 38 + 28))
+end
+status:GetPropertyChangedSignal("AbsoluteSize"):Connect(relayout)
+relayout()
+
 local statusKind = "info"
+local function paintStatus()
+	status.TextColor3 = statusKind == "error" and color(Enum.StudioStyleGuideColor.ErrorText)
+		or color(Enum.StudioStyleGuideColor.MainText)
+end
+
 local function paint()
 	root.BackgroundColor3 = color(Enum.StudioStyleGuideColor.MainBackground)
 	list.BackgroundColor3 = color(Enum.StudioStyleGuideColor.MainBackground)
 	footer.TextColor3 = color(Enum.StudioStyleGuideColor.DimmedText)
-	status.TextColor3 = statusKind == "error" and color(Enum.StudioStyleGuideColor.ErrorText)
-		or color(Enum.StudioStyleGuideColor.MainText)
+	paintStatus()
 	for _, b in { refresh, table.unpack(list:GetChildren()) } do
 		if b:IsA("TextButton") then
 			b.BackgroundColor3 = color(Enum.StudioStyleGuideColor.Button)
@@ -425,8 +444,7 @@ studio.ThemeChanged:Connect(paint)
 local function say(text: string, kind: string?)
 	status.Text = text
 	statusKind = kind or "info"
-	status.TextColor3 = statusKind == "error" and color(Enum.StudioStyleGuideColor.ErrorText)
-		or color(Enum.StudioStyleGuideColor.MainText)
+	paintStatus()
 end
 
 local busy = false

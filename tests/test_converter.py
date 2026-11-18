@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from converter import __main__ as cli  # noqa: E402
 from converter.fbx_reader import TICKS_PER_SECOND, FbxError, load  # noqa: E402
 from converter.retarget import (FPS, M, PARTS, align, bone_time_range, conj, convert, global_pose, heading, mm, mt, mv,  # noqa: E402
-                                quat, resolve_names, ry)
+                                quat, quat_to_matrix, resolve_names, ry)
 
 SAMPLE = os.environ.get("MOTIVE_TEST_FBX", "")
 
@@ -30,13 +30,6 @@ SEGMENTS = {
     "RightUpperLeg": ("RightUpLeg", "RightLeg", (0, -1, 0)), "RightLowerLeg": ("RightLeg", "RightFoot", (0, -1, 0)),
     "LeftFoot": ("LeftFoot", "LeftToeBase", None), "UpperTorso": ("Spine4", "Neck", None),
 }
-
-
-def quat_to_matrix(q):
-    x, y, z, w = q
-    return [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
-            2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
-            2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]
 
 
 def angle(a, b):
@@ -71,10 +64,21 @@ class MathTests(unittest.TestCase):
         self.assertAlmostEqual(_sample(((0, 10), (179.0, -179.0)), 5, 0, True), 180.0)
         self.assertAlmostEqual(_sample(((0, 10), (10.0, 20.0)), 5, 0), 15.0)
 
+    def test_rotation_interpolated_as_a_whole_near_gimbal_lock(self):
+        """Between two keys where Y is near 90 deg the Euler X and Z jump by 180 while the rotation barely moves."""
+        from converter.retarget import _rotation_at, euler_xyz
+        a, b = [10.0, 89.0, 20.0], [-170.0, 91.0, -160.0]
+        m = {"R": [0, 0, 0], "r_keys": (0, 10), "curves": {"R": [((0, 10), (a[i], b[i])) for i in range(3)]}}
+        mid = _rotation_at(m, 5)
+        ra, rb = euler_xyz(a), euler_xyz(b)
+        for end in (ra, rb):  # the midpoint stays close to both keys (they are 2 deg apart)
+            self.assertLess(max(abs(x - y) for x, y in zip(mid, end)), 0.05)
+
     def test_safe_name(self):
         self.assertEqual(cli.safe_name("261106 Big T_001"), "261106_Big_T_001")
         self.assertEqual(cli.safe_name("***"), "take")
         self.assertEqual(cli.safe_name("Index"), "Index_take")  # never overwrites index.json
+        self.assertEqual(cli.safe_name("tolte"), "tolte_take")
 
     def test_align_opposite_directions(self):
         r = align([0, -1, 0], [0, 1, 0])
@@ -150,6 +154,8 @@ class EndToEndTests(unittest.TestCase):
         late = copy.deepcopy(self.skel)
         shift = 10 * TICKS_PER_SECOND
         for m in late.models.values():
+            if m.get("r_keys"):
+                m["r_keys"] = tuple(t + shift for t in m["r_keys"])
             for key in ("T", "R"):
                 if m["curves"].get(key):
                     m["curves"][key] = [None if c is None else (tuple(t + shift for t in c[0]), c[1])
@@ -164,9 +170,18 @@ class EndToEndTests(unittest.TestCase):
             os.makedirs(src)
             for name in ("Take 1.fbx", "Take.1.fbx"):
                 shutil.copy(SAMPLE, os.path.join(src, name))
-            self.assertEqual(cli.main(["--out=" + out, src]), 1)
+            self.assertEqual(cli.main(["--out=" + out, src]), cli.PARTIAL)
             with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
                 self.assertEqual([t["name"] for t in json.load(f)["takes"]], ["Take 1"])
+
+    def test_unsupported_settings_on_intermediate_bones(self):
+        for setting in ("pre", "scale"):
+            broken = copy.deepcopy(self.skel)
+            spine2 = broken.by_name["Spine2"]  # not used directly, but an ancestor of Spine4
+            broken.models[spine2]["unsupported"] = "l'osso Spine2 %s" % setting
+            with self.assertRaises(FbxError) as e:
+                convert(broken, "x")
+            self.assertIn("Spine2", str(e.exception))
 
     def test_missing_bone_is_reported(self):
         broken = copy.deepcopy(self.skel)
@@ -197,7 +212,7 @@ class EndToEndTests(unittest.TestCase):
                     return [t["name"] for t in json.load(f)["takes"]]
 
             # a dragged folder plus a dragged file: the broken file is reported, the good ones converted
-            self.assertEqual(cli.main(["--out=" + out, motive, single]), 1)
+            self.assertEqual(cli.main(["--out=" + out, motive, single]), cli.PARTIAL)
             self.assertEqual(index(), ["My Take", "Singola"])
             self.assertEqual(sorted(os.listdir(motive)), ["My Take.fbx", "broken.fbx", "sottocartella"])  # nothing moved
             self.assertTrue(os.path.isfile(os.path.join(d, "repo", ".convertiti.json")))
@@ -206,7 +221,15 @@ class EndToEndTests(unittest.TestCase):
             os.remove(os.path.join(out, "My_Take.json"))
             self.assertEqual(cli.main(["--out=" + out, motive]), 0)
             self.assertEqual(index(), ["Singola"])
-            # a re-exported file (new date) is converted again
+            # a re-exported file (new date) is converted again; a removed take stays out (tolte.json)
+            for path in (os.path.join(motive, "My Take.fbx"), single):
+                st = os.stat(path)
+                os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
+            self.assertEqual(cli.main(["--out=" + out, motive, single]), 0)
+            self.assertEqual(index(), ["Singola"])
+            # back on purpose: drop it from tolte.json
+            with open(os.path.join(out, "tolte.json"), "w", encoding="utf-8") as f:
+                json.dump({"format": "motive-roblox-tolte", "version": 1, "takes": []}, f)
             st = os.stat(os.path.join(motive, "My Take.fbx"))
             os.utime(os.path.join(motive, "My Take.fbx"), ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
             self.assertEqual(cli.main(["--out=" + out, motive]), 0)
@@ -217,10 +240,25 @@ class EndToEndTests(unittest.TestCase):
             shutil.copy(os.path.join(motive, "My Take.fbx"), os.path.join(other, "My Take.fbx"))
             st = os.stat(os.path.join(other, "My Take.fbx"))
             os.utime(os.path.join(other, "My Take.fbx"), ns=(st.st_atime_ns, st.st_mtime_ns + 5 * 10 ** 9))
-            self.assertEqual(cli.main(["--out=" + out, other]), 1)
+            self.assertEqual(cli.main(["--out=" + out, other]), cli.PARTIAL)
             self.assertEqual(index(), ["My Take", "Singola"])
             # something that is neither a folder nor an .fbx: stop
             self.assertEqual(cli.main(["--out=" + out, os.path.join(d, "non esiste")]), 2)
+
+    def test_removed_take_does_not_come_back_from_another_pc(self):
+        with tempfile.TemporaryDirectory() as d:
+            motive, out = os.path.join(d, "export"), os.path.join(d, "repo", "animazioni")
+            os.makedirs(motive)
+            shutil.copy(SAMPLE, os.path.join(motive, "Brutta.fbx"))
+            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
+            os.remove(os.path.join(out, "Brutta.json"))  # the teacher removes the take
+            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
+            os.remove(os.path.join(d, "repo", ".convertiti.json"))  # another PC: no local record
+            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
+            with open(os.path.join(out, "index.json"), encoding="utf-8") as f:
+                self.assertEqual(json.load(f)["takes"], [])
+            with open(os.path.join(out, "tolte.json"), encoding="utf-8") as f:
+                self.assertEqual(json.load(f)["takes"], ["Brutta.json"])
 
 
 if __name__ == "__main__":

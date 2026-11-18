@@ -134,9 +134,11 @@ def resolve_names(skel):
         missing = [b for b in REQUIRED if prefix + b not in skel.by_name]
         raise FbxError("ossa mancanti: %s (lo scheletro non e' quello di Motive atteso)" % ", ".join(missing))
     ids = {b: skel.by_name[complete[0] + b] for b in REQUIRED}
-    for uid in ids.values():
-        if skel.models[uid].get("unsupported"):
-            raise FbxError(skel.models[uid]["unsupported"])
+    for uid in ids.values():  # the used bones and every ancestor global_pose walks through
+        while uid in skel.models:
+            if skel.models[uid].get("unsupported"):
+                raise FbxError(skel.models[uid]["unsupported"])
+            uid = skel.parent.get(uid)
     return ids
 
 
@@ -171,6 +173,50 @@ def _sample(curve, t, default, angular=False):
     return kv[lo] + delta * f
 
 
+def quat_to_matrix(q):
+    x, y, z, w = q
+    return [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
+            2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
+            2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]
+
+
+def _slerp(q0, q1, f):
+    d = sum(a * b for a, b in zip(q0, q1))
+    if d < 0:
+        q1, d = [-x for x in q1], -d
+    if d > 0.9995:
+        q = [a + (b - a) * f for a, b in zip(q0, q1)]
+    else:
+        th = math.acos(d)
+        s0, s1 = math.sin((1 - f) * th) / math.sin(th), math.sin(f * th) / math.sin(th)
+        q = [a * s0 + b * s1 for a, b in zip(q0, q1)]
+    n = math.sqrt(sum(x * x for x in q))
+    return [x / n for x in q]
+
+
+def _rotation_at(m, t):
+    """Local rotation matrix of a bone at time t. Between two keys the rotation is interpolated as a whole
+    (slerp): interpolating Euler channels one by one breaks where the Euler angles jump (near gimbal lock)."""
+    keys, curves = m.get("r_keys"), m["curves"].get("R")
+    if keys is None:
+        return euler_xyz([_sample(c, t, d, True) for c, d in zip(curves or [None] * 3, m["R"])])
+    if t <= keys[0] or t >= keys[-1]:
+        i = 0 if t <= keys[0] else len(keys) - 1
+        return euler_xyz([c[1][i] for c in curves])
+    lo, hi = 0, len(keys) - 1
+    while hi - lo > 1:
+        mid = (lo + hi) // 2
+        if keys[mid] <= t:
+            lo = mid
+        else:
+            hi = mid
+    if t == keys[lo]:
+        return euler_xyz([c[1][lo] for c in curves])
+    q0 = quat(euler_xyz([c[1][lo] for c in curves]))
+    q1 = quat(euler_xyz([c[1][hi] for c in curves]))
+    return quat_to_matrix(_slerp(q0, q1, (t - keys[lo]) / (keys[hi] - keys[lo])))
+
+
 def global_pose(skel, ids, t_ticks):
     """World rotation and position (source axes) of the required bones; t_ticks=None -> rest pose."""
     cache = {}
@@ -180,11 +226,10 @@ def global_pose(skel, ids, t_ticks):
             return cache[uid]
         m = skel.models[uid]
         if t_ticks is None:
-            tr, rot = m["T"], m["R"]
+            tr, local = m["T"], euler_xyz(m["R"])
         else:
             tr = [_sample(c, t_ticks, d) for c, d in zip(m["curves"].get("T", [None] * 3), m["T"])]
-            rot = [_sample(c, t_ticks, d, True) for c, d in zip(m["curves"].get("R", [None] * 3), m["R"])]
-        local = euler_xyz(rot)
+            local = _rotation_at(m, t_ticks)
         pu = skel.parent.get(uid)
         if pu in skel.models:
             pr, pp = get(pu)
