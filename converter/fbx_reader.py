@@ -129,8 +129,8 @@ def load(path):
         if len(c[1]) < 3:
             continue
         kind, child, par = c[1][0], c[1][1], c[1][2]
-        if kind == "OO" and child in models:
-            parent[child] = par
+        if kind == "OO" and child in models and (par in models or par == 0):
+            parent[child] = par  # bone hierarchy only: a bone is also linked to skin clusters
         elif kind == "OP" and len(c[1]) > 3 and child in curves and par in cnodes:
             cnodes[par][c[1][3]] = curves[child]
         elif kind == "OP" and len(c[1]) > 3 and child in cnodes and par in models:

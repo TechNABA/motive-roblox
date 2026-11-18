@@ -182,6 +182,15 @@ local function readTake(data)
 	for _, p in PARTS do
 		if not index[p] then fail("Il file dell'animazione e' danneggiato: riscaricalo.") end
 	end
+	-- the frames are composed with CANON_PARENT: a take built on another hierarchy must be refused
+	if type(data.parents) ~= "table" or #data.parents ~= #parts then
+		fail("Il file dell'animazione e' danneggiato: riscaricalo.")
+	end
+	for i, p in parts do
+		if data.parents[i] ~= CANON_PARENT[p] then
+			fail("Questa animazione e' di una versione diversa: aggiorna il plugin (Plugins > Manage Plugins).")
+		end
+	end
 	local fps = data.fps
 	if type(fps) ~= "number" or fps < 1 or fps > 1000 then
 		fail("Il file dell'animazione e' danneggiato: riscaricalo.")
@@ -207,6 +216,10 @@ local function animSavesFolder(rig: Model): Instance
 	if ref and ref:IsA("ObjectValue") and ref.Value and ref.Value.Parent then
 		return ref.Value
 	end
+	if ref and not ref:IsA("ObjectValue") then
+		-- older Studio versions kept the saves in a folder inside the rig: keep using it, the editor migrates it
+		return ref
+	end
 	local ss = game:GetService("ServerStorage")
 	local root = ss:FindFirstChild("RBX_ANIMSAVES")
 	if not root then
@@ -224,8 +237,7 @@ local function animSavesFolder(rig: Model): Instance
 		holder.Value = rig
 		holder.Parent = root
 	end
-	if not (ref and ref:IsA("ObjectValue")) then
-		if ref then ref.Name = "AnimSaves_vecchio" end
+	if not ref then
 		ref = Instance.new("ObjectValue")
 		ref.Name = "AnimSaves"
 		ref.Parent = rig

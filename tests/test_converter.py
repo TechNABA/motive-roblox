@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from converter import __main__ as cli  # noqa: E402
 from converter.fbx_reader import TICKS_PER_SECOND, FbxError, load  # noqa: E402
-from converter.retarget import (FPS, M, PARTS, align, conj, convert, global_pose, mm, mt, mv,  # noqa: E402
+from converter.retarget import (FPS, M, PARTS, align, conj, convert, global_pose, heading, mm, mt, mv,  # noqa: E402
                                 quat, quat_to_matrix, resolve_names, ry)
 
 SAMPLE = os.environ.get("MOTIVE_TEST_FBX", "")
@@ -50,6 +50,18 @@ class MathTests(unittest.TestCase):
         for r in (ry(30), mm(ry(170), [1, 0, 0, 0, 0, -1, 0, 1, 0]), [-1, 0, 0, 0, 1, 0, 0, 0, -1]):
             back = quat_to_matrix(quat(r))
             self.assertLess(max(abs(a - b) for a, b in zip(r, back)), 1e-9)
+
+    def test_heading_ignores_bending(self):
+        for yaw in (0, 37, -120):
+            for pitch in (0, 85, 95):  # standing, bent over, lying face down
+                c, s = math.cos(math.radians(pitch)), math.sin(math.radians(pitch))
+                d = mm(ry(yaw), [1, 0, 0, 0, c, -s, 0, s, c])
+                self.assertAlmostEqual(heading(d), yaw, places=6)
+
+    def test_euler_interpolation_takes_short_way(self):
+        from converter.retarget import _sample
+        self.assertAlmostEqual(_sample(((0, 10), (179.0, -179.0)), 5, 0, True), 180.0)
+        self.assertAlmostEqual(_sample(((0, 10), (10.0, 20.0)), 5, 0), 15.0)
 
     def test_safe_name(self):
         self.assertEqual(cli.safe_name("261106 Big T_001"), "261106_Big_T_001")
@@ -102,9 +114,7 @@ class EndToEndTests(unittest.TestCase):
         ids = resolve_names(skel)
         rest = global_pose(skel, ids, None)
         w0 = global_pose(skel, ids, 0)
-        d0 = conj(mm(w0["Hips"][0], mt(rest["Hips"][0])))
-        fwd = mv(d0, [0, 0, -1])
-        yaw = ry(-math.degrees(math.atan2(-fwd[0], -fwd[2])))
+        yaw = ry(-heading(conj(mm(w0["Hips"][0], mt(rest["Hips"][0])))))
         worst = 0.0
         for f in range(0, take["frames"], 7):
             world = compose(take, f)

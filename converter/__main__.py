@@ -93,13 +93,26 @@ def main(argv):
             print("ERRORE  %s: %s" % (fn, e))
             continue
         # converted files leave the inbox, so a take deleted from the output is not recreated
-        os.makedirs(done_dir, exist_ok=True)
-        os.replace(src, os.path.join(done_dir, fn))
+        try:
+            os.makedirs(done_dir, exist_ok=True)
+            os.replace(src, os.path.join(done_dir, fn))
+        except OSError as e:
+            print("ATTENZIONE %s: convertita, ma non riesco a spostarla in %s (e' aperta in un altro programma?): %s"
+                  % (fn, DONE_DIR, e))
         print("ok      %s  (%.1f s)" % (fn, take["seconds"]))
     takes = build_index(out_dir)
     print("\n%d convertite, %d con errori. Nell'elenco degli studenti: %d take." % (len(fbx) - failed, failed, len(takes)))
     return 1 if failed else 0
 
 
+def run(argv):
+    """Exit codes: 0 all converted, 1 some files rejected (the others are fine to publish), >= 2 stop, publish nothing."""
+    try:
+        return main(argv)
+    except Exception as e:
+        print("ERRORE imprevisto, niente viene pubblicato: %s: %s" % (type(e).__name__, e))
+        return 3
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(run(sys.argv[1:]))

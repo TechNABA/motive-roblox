@@ -85,6 +85,10 @@ local ok, err = pcall(function()
 	bad.fps = 0
 	check(studentError(Motive.buildTake, created[1], bad) ~= nil, "fps 0 not rejected")
 	check(studentError(Motive.buildTake, created[1], { format = "x" }) ~= nil, "foreign file not rejected")
+	local otherTree = table.clone(gw)
+	otherTree.parents = table.clone(gw.parents)
+	otherTree.parents[table.find(gw.parts, "Head")] = "LowerTorso"
+	check(studentError(Motive.buildTake, created[1], otherTree) ~= nil, "different hierarchy not rejected")
 	local orphan = Motive.buildTake(created[1], gw)
 	created[1].Parent = nil
 	check(studentError(Motive.saveTake, created[1], orphan, "x") ~= nil, "removed avatar not reported")

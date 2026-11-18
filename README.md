@@ -76,6 +76,8 @@ Da quel momento gli studenti lo installano con un clic e Studio lo aggiorna da s
 - Dita e punte dei piedi non ci sono: un avatar R15 ha solo mano e piede interi. Le 5 ossa della schiena diventano
   UpperTorso, collo e testa diventano Head.
 - Ogni frame e' un keyframe (30 al secondo). Nell'Animation Editor: **... > Optimize Keyframes** per sfoltirli.
+- Il convertitore rilegge tutte le take per ricostruire l'elenco: con centinaia di take ogni giro richiede qualche
+  secondo in piu'.
 
 ## Sviluppo
 

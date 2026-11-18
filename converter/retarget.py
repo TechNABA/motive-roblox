@@ -144,7 +144,7 @@ def resolve_names(skel):
     return {b: skel.by_name[prefix + b] for b in REQUIRED}
 
 
-def _sample(curve, t, default):
+def _sample(curve, t, default, angular=False):
     if curve is None:
         return default
     kt, kv = curve
@@ -160,7 +160,10 @@ def _sample(curve, t, default):
         else:
             hi = mid
     f = (t - kt[lo]) / (kt[hi] - kt[lo])
-    return kv[lo] + (kv[hi] - kv[lo]) * f
+    delta = kv[hi] - kv[lo]
+    if angular:  # Euler angles in degrees: go the short way across the +-180 wrap
+        delta = (delta + 180.0) % 360.0 - 180.0
+    return kv[lo] + delta * f
 
 
 def global_pose(skel, ids, t_ticks):
@@ -175,7 +178,7 @@ def global_pose(skel, ids, t_ticks):
             tr, rot = m["T"], m["R"]
         else:
             tr = [_sample(c, t_ticks, d) for c, d in zip(m["curves"].get("T", [None] * 3), m["T"])]
-            rot = [_sample(c, t_ticks, d) for c, d in zip(m["curves"].get("R", [None] * 3), m["R"])]
+            rot = [_sample(c, t_ticks, d, True) for c, d in zip(m["curves"].get("R", [None] * 3), m["R"])]
         local = euler_xyz(rot)
         pu = skel.parent.get(uid)
         if pu in skel.models:
@@ -202,6 +205,17 @@ def check_rest(rest):
         raise FbxError("lo scheletro non ha l'asse Y verso l'alto: esporta da Motive con Y up")
     if left <= 0 or toe <= 0:
         raise FbxError("nella posa di riposo l'attore non guarda verso +Z: controlla le impostazioni di export")
+
+
+def heading(d):
+    """Yaw (degrees) of the hips rotation d. Taken from the left-right axis, which stays horizontal when the actor
+    starts bent forward or lying down (Crawl, Bridge); the forward axis is the fallback (e.g. lying on a side)."""
+    left = mv(d, [-1, 0, 0])
+    if math.hypot(left[0], left[2]) > 0.3:
+        fwd = [-left[2], 0, left[0]]
+    else:
+        fwd = mv(d, [0, 0, -1])
+    return math.degrees(math.atan2(-fwd[0], -fwd[2]))
 
 
 def leg_length(rest):
@@ -244,9 +258,7 @@ def convert(skel, name, travel=True):
             offs[part] = I3
     worlds = [global_pose(skel, ids, skel.start_ticks + round(f * TICKS_PER_SECOND / FPS)) for f in range(nframes)]
     rest_inv = {b: mt(rest[b][0]) for b in ids}
-    d0 = conj(mm(worlds[0]["Hips"][0], rest_inv["Hips"]))
-    fwd = mv(d0, [0, 0, -1])
-    yaw_fix = ry(-math.degrees(math.atan2(-fwd[0], -fwd[2])))  # start facing Roblox forward (-Z)
+    yaw_fix = ry(-heading(conj(mm(worlds[0]["Hips"][0], rest_inv["Hips"]))))  # start facing Roblox forward (-Z)
     hips = [mv(yaw_fix, mv(M, w["Hips"][1])) for w in worlds]
     rest_h = mv(M, rest["Hips"][1])
     xs, zs = [h[0] for h in hips], [h[2] for h in hips]

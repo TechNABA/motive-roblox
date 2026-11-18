@@ -26,6 +26,8 @@ if errorlevel 1 (
     echo Non riesco a collegarmi a GitHub: controlla la connessione e riprova.
     goto fine
 )
+rem index.json is rebuilt by the converter: on a conflict keep either side (.gitattributes: merge=ours)
+git config merge.ours.driver true
 git rebase --quiet --autostash origin/master >nul 2>&1
 if errorlevel 1 (
     git rebase --abort >nul 2>&1
@@ -43,9 +45,9 @@ python -m converter export_motive animazioni
 if errorlevel 2 goto fine
 
 git add animazioni
-git diff --cached --quiet
+git diff --cached --quiet -- animazioni
 if errorlevel 1 (
-    git commit --quiet -m "Aggiorna le take"
+    git commit --quiet -m "Aggiorna le take" -- animazioni
     if errorlevel 1 (
         echo.
         echo Non riesco a registrare le modifiche. Se e' la prima volta su questo PC, apri un terminale e scrivi:
