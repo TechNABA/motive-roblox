@@ -41,9 +41,13 @@ fuori da Git) ricorda quali sono gia' convertiti: trascinare di nuovo la stessa 
 Un FBX riesportato da Motive (data cambiata) viene riconvertito da solo. Con il doppio clic, senza trascinare,
 `Converti.bat` usa la cartella `export_motive` del repository.
 
-Per **togliere** una take: cancella il suo `.json` da `animazioni/`, poi doppio clic su `Converti.bat`.
+Per **togliere** una take: cancella il suo `.json` da `animazioni/`, poi doppio clic su `Converti.bat`. La take
+finisce in `animazioni/tolte.json`, pubblicato con le altre: da quel momento nessun PC la riconverte, anche se il suo
+FBX e' ancora nella cartella trascinata. Per **rimetterla**: togli il suo nome da `tolte.json` e trascina di nuovo l'FBX.
 Per **riconvertire tutto** (per esempio dopo un aggiornamento del convertitore): cancella `.convertiti.json` e
-trascina di nuovo le cartelle.
+trascina di nuovo le cartelle; le take tolte restano tolte.
+
+Nei nomi delle cartelle da trascinare evita i caratteri `&` e `^`: Windows spezza il percorso prima che lo script parta.
 
 ### Cosa controlla il convertitore
 
@@ -91,7 +95,12 @@ Da quel momento gli studenti lo installano con un clic e Studio lo aggiorna da s
   (senza la variabile, i test che leggono un FBX vero vengono saltati).
 - File del plugin per la release: `python tools/build_plugin.py` -> `build/MotiveAnimazioni.rbxmx`.
 - Test del plugin in Studio: istruzioni in testa a `tests/plugin_test.luau` (scarica take vere da GitHub, le
-  applica a un R15 classico e a un R15 Plus creati al volo, confronta con Motive, pulisce; stampa PASS).
+  applica a un R15 classico e a un R15 Plus creati al volo, confronta con Motive, prova gli errori, pulisce; stampa PASS).
+- Test di `Converti.bat` (Windows): `MOTIVE_TEST_FBX=<una take .fbx>`, poi
+  `powershell -NoProfile -ExecutionPolicy Bypass -File tests\converti_bat_test.ps1`. Usa un GitHub finto locale:
+  trascinamento, rete assente, push rifiutato e recuperato, due PC, take tolte, aggiornamento dello script durante
+  l'esecuzione, PC senza identita' Git. Stampa PASS.
+- Codici d'uscita del convertitore: 0 tutto convertito, 10 alcuni file rifiutati (gli altri si pubblicano), altro = stop.
 - Formato di una take (`animazioni/<take>.json`): `frames` frame a `fps` 30; per ogni frame `root` (3 numeri: spostamento
   del bacino in stud sul rig R15 classico) e `rot` (15 quaternioni x, y, z, w: rotazione locale di ogni parte nell'ordine
   di `parts`, con genitori in `parents`).
