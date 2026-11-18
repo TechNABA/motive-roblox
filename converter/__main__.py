@@ -76,15 +76,19 @@ def file_key(path):
 
 
 def load_record(path):
+    """{"files": {fbx key: take file}, "origin": {take file: folder of its FBX}}"""
+    empty = {"files": {}, "origin": {}}
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        return data if isinstance(data, dict) else {}
     except FileNotFoundError:
-        return {}
+        return empty
     except (OSError, ValueError):
+        data = None
+    if not (isinstance(data, dict) and isinstance(data.get("files"), dict) and isinstance(data.get("origin"), dict)):
         print("ATTENZIONE: il registro %s e' illeggibile, lo ricreo (gli FBX verranno riconvertiti)" % path)
-        return {}
+        return empty
+    return data
 
 
 def collect_inputs(inputs):
@@ -124,21 +128,27 @@ def main(argv):
         stem = os.path.splitext(fn)[0]
         try:
             key = file_key(src)
-            if key in record:
+            if key in record["files"]:
                 skipped += 1
                 continue
             out_name = safe_name(stem) + ".json"
             if out_name.lower() in seen:
                 raise FbxError("stesso nome di %s, convertito in questo giro: rinomina uno dei due" % seen[out_name.lower()])
+            folder = os.path.dirname(os.path.abspath(src))
+            replacing = os.path.exists(os.path.join(out_dir, out_name))
+            origin = record["origin"].get(out_name)
+            if replacing and origin and os.path.normcase(origin) != os.path.normcase(folder):
+                raise FbxError("esiste gia' una take con questo nome, da un'altra cartella (%s): rinomina l'FBX" % origin)
             take = convert_one(src, stem, os.path.join(out_dir, out_name), travel)
         except Exception as e:  # one bad file must not stop the others
             failed += 1
             print("ERRORE  %s: %s" % (src, e))
             continue
         seen[out_name.lower()] = src
-        record[key] = out_name
+        record["files"][key] = out_name
+        record["origin"][out_name] = folder
         done += 1
-        print("ok      %s  (%.1f s)" % (fn, take["seconds"]))
+        print("%s %s  (%.1f s)" % ("sostituita" if replacing else "ok     ", fn, take["seconds"]))
     write_json(record_path, record)
     takes = build_index(out_dir)
     if skipped:

@@ -108,12 +108,14 @@ def load(path):
         if n[0] == "Model":
             p = _props70(n)
             name = n[1][1].split("\x00")[0]
+            unsupported = None  # checked later, only on the bones the converter uses
             if p.get("RotationOrder", [0])[0] != 0:
-                raise FbxError("l'osso %s usa un ordine di rotazione non supportato" % name)
+                unsupported = "l'osso %s usa un ordine di rotazione non supportato" % name
             pre = list(p.get("PreRotation", [0, 0, 0])) + list(p.get("PostRotation", [0, 0, 0]))
             if any(abs(x) > 1e-6 for x in pre):
-                raise FbxError("l'osso %s ha Pre/PostRotation, non supportate" % name)
-            models[n[1][0]] = {"name": name, "T": list(p.get("Lcl Translation", [0, 0, 0])),
+                unsupported = "l'osso %s ha Pre/PostRotation, non supportate" % name
+            models[n[1][0]] = {"name": name, "kind": n[1][2] if len(n[1]) > 2 else "", "unsupported": unsupported,
+                               "T": list(p.get("Lcl Translation", [0, 0, 0])),
                                "R": list(p.get("Lcl Rotation", [0, 0, 0])), "curves": {}}
         elif n[0] == "AnimationCurveNode":
             cnodes[n[1][0]] = {}
@@ -139,7 +141,7 @@ def load(path):
             models[mid]["curves"][key] = [cnodes[cn].get(a) for a in ("d|X", "d|Y", "d|Z")]
     if not curves:
         raise FbxError("l'FBX non contiene animazione")
-    by_name = {}
-    for uid, m in models.items():
+    by_name = {}  # skeleton bones (LimbNode) win over markers or props with the same name
+    for uid, m in sorted(models.items(), key=lambda item: item[1]["kind"] != "LimbNode"):
         by_name.setdefault(m["name"], uid)
     return Skeleton(models, parent, by_name, up_axis)

@@ -168,8 +168,11 @@ end
 
 -- Check a decoded take file and return a reader for its frames.
 local function readTake(data)
-	if type(data) ~= "table" or data.format ~= "motive-roblox" or data.version ~= 1 then
+	if type(data) ~= "table" or data.format ~= "motive-roblox" then
 		fail("Il file non e' un'animazione Motive valida.")
+	end
+	if data.version ~= 1 then
+		fail("Questa animazione e' di una versione diversa: aggiorna il plugin (Plugins > Manage Plugins).")
 	end
 	local n, parts = data.frames, data.parts
 	if type(n) ~= "number" or n < 1 or type(parts) ~= "table" or #parts ~= #PARTS
@@ -422,7 +425,8 @@ studio.ThemeChanged:Connect(paint)
 local function say(text: string, kind: string?)
 	status.Text = text
 	statusKind = kind or "info"
-	paint()
+	status.TextColor3 = statusKind == "error" and color(Enum.StudioStyleGuideColor.ErrorText)
+		or color(Enum.StudioStyleGuideColor.MainText)
 end
 
 local busy = false
@@ -493,6 +497,7 @@ local function loadList()
 				b.Activated:Connect(function() useTake(entry) end)
 			end
 		end
+		paint() -- color the new buttons
 		say("1. Crea il tuo avatar: scheda Avatar > Character.\n2. Clicca un'animazione qui sotto.", "info")
 	end)
 end

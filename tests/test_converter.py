@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from converter import __main__ as cli  # noqa: E402
 from converter.fbx_reader import TICKS_PER_SECOND, FbxError, load  # noqa: E402
 from converter.retarget import (FPS, M, PARTS, align, bone_time_range, conj, convert, global_pose, heading, mm, mt, mv,  # noqa: E402
-                                quat, quat_to_matrix, resolve_names, ry)
+                                quat, resolve_names, ry)
 
 SAMPLE = os.environ.get("MOTIVE_TEST_FBX", "")
 
@@ -26,10 +26,17 @@ SEGMENTS = {
     "LeftUpperArm": ("LeftArm", "LeftForeArm", (0, -1, 0)), "LeftLowerArm": ("LeftForeArm", "LeftHand", (0, -1, 0)),
     "RightUpperArm": ("RightArm", "RightForeArm", (0, -1, 0)),
     "RightLowerArm": ("RightForeArm", "RightHand", (0, -1, 0)),
-    "LeftUpperLeg": ("LeftUpLeg", "LeftLeg", None), "LeftLowerLeg": ("LeftLeg", "LeftFoot", None),
-    "RightUpperLeg": ("RightUpLeg", "RightLeg", None), "RightLowerLeg": ("RightLeg", "RightFoot", None),
+    "LeftUpperLeg": ("LeftUpLeg", "LeftLeg", (0, -1, 0)), "LeftLowerLeg": ("LeftLeg", "LeftFoot", (0, -1, 0)),
+    "RightUpperLeg": ("RightUpLeg", "RightLeg", (0, -1, 0)), "RightLowerLeg": ("RightLeg", "RightFoot", (0, -1, 0)),
     "LeftFoot": ("LeftFoot", "LeftToeBase", None), "UpperTorso": ("Spine4", "Neck", None),
 }
+
+
+def quat_to_matrix(q):
+    x, y, z, w = q
+    return [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
+            2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
+            2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]
 
 
 def angle(a, b):
@@ -203,6 +210,14 @@ class EndToEndTests(unittest.TestCase):
             st = os.stat(os.path.join(motive, "My Take.fbx"))
             os.utime(os.path.join(motive, "My Take.fbx"), ns=(st.st_atime_ns, st.st_mtime_ns + 10 ** 9))
             self.assertEqual(cli.main(["--out=" + out, motive]), 0)
+            self.assertEqual(index(), ["My Take", "Singola"])
+            # same name from another session folder: refused, the published take is kept
+            other = os.path.join(d, "Altra sessione")
+            os.makedirs(other)
+            shutil.copy(os.path.join(motive, "My Take.fbx"), os.path.join(other, "My Take.fbx"))
+            st = os.stat(os.path.join(other, "My Take.fbx"))
+            os.utime(os.path.join(other, "My Take.fbx"), ns=(st.st_atime_ns, st.st_mtime_ns + 5 * 10 ** 9))
+            self.assertEqual(cli.main(["--out=" + out, other]), 1)
             self.assertEqual(index(), ["My Take", "Singola"])
             # something that is neither a folder nor an .fbx: stop
             self.assertEqual(cli.main(["--out=" + out, os.path.join(d, "non esiste")]), 2)

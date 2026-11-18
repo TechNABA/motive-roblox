@@ -36,7 +36,10 @@ if errorlevel 1 (
 rem takes removed by hand are recorded first, so the rebase cannot lose them in the autostash
 git add animazioni
 git diff --cached --quiet -- animazioni
-if errorlevel 1 git commit --quiet -m "Toglie take" -- animazioni >nul 2>&1
+if errorlevel 1 (
+    git commit --quiet -m "Aggiorna le take" -- animazioni >nul 2>&1
+    if errorlevel 1 goto noidentity
+)
 rem index.json is rebuilt by the converter: on a conflict keep either side (.gitattributes: merge=ours)
 git config merge.ours.driver true
 git rebase --quiet --autostash origin/master >nul 2>&1
@@ -62,14 +65,7 @@ git add animazioni
 git diff --cached --quiet -- animazioni
 if errorlevel 1 (
     git commit --quiet -m "Aggiorna le take" -- animazioni
-    if errorlevel 1 (
-        echo.
-        echo Non riesco a registrare le modifiche. Se e' la prima volta su questo PC, apri un terminale e scrivi:
-        echo     git config --global user.name "Il tuo nome"
-        echo     git config --global user.email "tua@email"
-        echo poi rilancia Converti.bat.
-        goto fine
-    )
+    if errorlevel 1 goto noidentity
 )
 set AHEAD=0
 for /f %%n in ('git rev-list --count origin/master..HEAD') do set AHEAD=%%n
@@ -87,6 +83,15 @@ if errorlevel 1 (
 )
 echo.
 echo Pubblicato. Gli studenti vedono le take nuove con "Aggiorna elenco" nel plugin (entro qualche minuto).
+
+goto fine
+
+:noidentity
+echo.
+echo Non riesco a registrare le modifiche. Se e' la prima volta su questo PC, apri un terminale e scrivi:
+echo     git config --global user.name "Il tuo nome"
+echo     git config --global user.email "tua@email"
+echo poi rilancia Converti.bat.
 
 :fine
 echo.

@@ -34,8 +34,9 @@ MAP = {
 PARTS = list(MAP)  # parents before children
 # extra bones needed to measure the rest pose
 REQUIRED = sorted({b for b, _ in MAP.values()} | {"LeftToeBase", "RightToeBase", "Neck"})
-# canonical rest direction of the arms (straight down) vs Motive T-pose: only these parts need an offset
-ARM_SEGMENTS = {"UpperArm": ("Arm", "ForeArm"), "LowerArm": ("ForeArm", "Hand"), "Hand": ("ForeArm", "Hand")}
+# limb parts keep their direction: canonical rest is straight down, Motive arms are a T-pose
+LIMB_SEGMENTS = {"UpperArm": ("Arm", "ForeArm"), "LowerArm": ("ForeArm", "Hand"), "Hand": ("ForeArm", "Hand"),
+                 "UpperLeg": ("UpLeg", "Leg"), "LowerLeg": ("Leg", "Foot")}
 
 
 # ---- 3x3 rotation helpers (row-major lists of 9) ----
@@ -118,13 +119,6 @@ def quat(r):
     return [x / n for x in q]
 
 
-def quat_to_matrix(q):
-    x, y, z, w = q
-    return [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
-            2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
-            2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]
-
-
 # ---- skeleton evaluation ----
 def resolve_names(skel):
     """Motive may prefix bone names with the skeleton name ("Actor_Hips"): find the prefix, check every bone."""
@@ -139,7 +133,11 @@ def resolve_names(skel):
         prefix = "" if "" in candidates else candidates[0]
         missing = [b for b in REQUIRED if prefix + b not in skel.by_name]
         raise FbxError("ossa mancanti: %s (lo scheletro non e' quello di Motive atteso)" % ", ".join(missing))
-    return {b: skel.by_name[complete[0] + b] for b in REQUIRED}
+    ids = {b: skel.by_name[complete[0] + b] for b in REQUIRED}
+    for uid in ids.values():
+        if skel.models[uid].get("unsupported"):
+            raise FbxError(skel.models[uid]["unsupported"])
+    return ids
 
 
 def bone_time_range(skel, ids):
@@ -254,10 +252,10 @@ def convert(skel, name, travel=True):
     nframes = int(round((end - start) * FPS / TICKS_PER_SECOND)) + 1
     if nframes < 2:
         raise FbxError("la take e' troppo corta")
-    # arms: Motive rest is a T-pose, canonical rest hangs down
+    # limbs: canonical rest hangs straight down; torso, head and feet map rest to rest
     offs = {}
     for part in PARTS:
-        seg = ARM_SEGMENTS.get(part.replace("Left", "").replace("Right", ""))
+        seg = LIMB_SEGMENTS.get(part.replace("Left", "").replace("Right", ""))
         if seg:
             side = "Left" if part.startswith("Left") else "Right"
             d = mv(M, [b - a for a, b in zip(rest[side + seg[0]][1], rest[side + seg[1]][1])])
