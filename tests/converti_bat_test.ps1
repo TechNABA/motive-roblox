@@ -17,13 +17,13 @@ New-Item -ItemType Directory $root | Out-Null
 $failures = New-Object System.Collections.Generic.List[string]
 function Check($cond, $what) { if (-not $cond) { $failures.Add($what) } }
 
-function Git { & git @args 2>$null }
+function Invoke-GitQuiet { & git.exe @args 2>$null }
 function Run-Bat($clone, [string[]]$dragged) {
     $quoted = ($dragged | ForEach-Object { '"' + $_ + '"' }) -join ' '
     $out = '' | cmd /c "`"$clone\Converti.bat`" $quoted" 2>&1
     return ($out | Out-String)
 }
-function Remote-Index { (Git -C "$root\remote.git" show master:animazioni/index.json | Out-String | ConvertFrom-Json).takes.name }
+function Remote-Index { (Invoke-GitQuiet -C "$root\remote.git" show master:animazioni/index.json | Out-String | ConvertFrom-Json).takes.name }
 function Add-Fbx($dir, $name, $offsetSeconds) {
     New-Item -ItemType Directory -Force $dir | Out-Null
     $path = Join-Path $dir $name
@@ -33,11 +33,11 @@ function Add-Fbx($dir, $name, $offsetSeconds) {
 }
 
 try {
-    Git clone -q --bare $repo "$root\remote.git"
-    Git -C "$root\remote.git" update-ref refs/heads/master (Git -C $repo rev-parse HEAD)
-    Git -C "$root\remote.git" symbolic-ref HEAD refs/heads/master
-    Git clone -q "$root\remote.git" "$root\a"
-    Git clone -q "$root\remote.git" "$root\b"
+    Invoke-GitQuiet clone -q --bare $repo "$root\remote.git"
+    Invoke-GitQuiet -C "$root\remote.git" update-ref refs/heads/master (Invoke-GitQuiet -C $repo rev-parse HEAD)
+    Invoke-GitQuiet -C "$root\remote.git" symbolic-ref HEAD refs/heads/master
+    Invoke-GitQuiet clone -q "$root\remote.git" "$root\a"
+    Invoke-GitQuiet clone -q "$root\remote.git" "$root\b"
     $export = Join-Path $root 'Export Motive'
 
     # 1. drag a folder whose name has spaces: converted and published, the FBX stay where they are
@@ -52,10 +52,10 @@ try {
     Check ($o -match 'niente da pubblicare') "2: republished an already converted file`n$o"
 
     # 3. GitHub unreachable
-    Git -C "$root\a" remote set-url origin "$root\non-esiste.git"
+    Invoke-GitQuiet -C "$root\a" remote set-url origin "$root\non-esiste.git"
     $o = Run-Bat "$root\a" @($export)
     Check ($o -match 'collegarmi a GitHub') "3: no connection message`n$o"
-    Git -C "$root\a" remote set-url origin "$root\remote.git"
+    Invoke-GitQuiet -C "$root\a" remote set-url origin "$root\remote.git"
 
     # 4. push refused, then a later run publishes the pending take
     Set-Content -Path "$root\remote.git\hooks\pre-receive" -Value "#!/bin/sh`nexit 1" -Encoding ascii -NoNewline
@@ -88,8 +88,8 @@ try {
     # 7. Converti.bat updated on GitHub while a run is in progress: the run still completes
     $bat = Get-Content "$root\b\Converti.bat" -Raw
     Set-Content -Path "$root\b\Converti.bat" -Value ("rem riga aggiunta`r`n" * 40 + $bat) -NoNewline -Encoding ascii
-    Git -C "$root\b" commit -qam 'Aggiorna Converti.bat'
-    Git -C "$root\b" push -q
+    Invoke-GitQuiet -C "$root\b" commit -qam 'Aggiorna Converti.bat'
+    Invoke-GitQuiet -C "$root\b" push -q
     $o = Run-Bat "$root\a" @((Add-Fbx "$root\Export C" 'Dopo Aggiornamento.fbx' 0))
     Check ($o -match 'Pubblicato') "7: run broken by the self-update`n$o"
     Check ((Remote-Index) -contains 'Dopo Aggiornamento') '7: take missing after the self-update'
