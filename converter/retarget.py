@@ -5,6 +5,7 @@ character facing -Z, left side on -X, arms and legs straight down at rest, hip->
 The output holds, per frame, the Motor6D.Transform rotation of each of the 15 R15 parts (as a quaternion)
 and the translation of LowerTorso. The Studio plugin adapts this to the student's avatar.
 """
+import bisect
 import math
 
 from .fbx_reader import TICKS_PER_SECOND, FbxError
@@ -159,13 +160,8 @@ def _sample(curve, t, default, angular=False):
         return kv[0]
     if t >= kt[-1]:
         return kv[-1]
-    lo, hi = 0, len(kt) - 1
-    while hi - lo > 1:
-        mid = (lo + hi) // 2
-        if kt[mid] <= t:
-            lo = mid
-        else:
-            hi = mid
+    lo = bisect.bisect_right(kt, t) - 1
+    hi = lo + 1
     f = (t - kt[lo]) / (kt[hi] - kt[lo])
     delta = kv[hi] - kv[lo]
     if angular:  # Euler angles in degrees: go the short way across the +-180 wrap
@@ -203,13 +199,8 @@ def _rotation_at(m, t):
     if t <= keys[0] or t >= keys[-1]:
         i = 0 if t <= keys[0] else len(keys) - 1
         return euler_xyz([c[1][i] for c in curves])
-    lo, hi = 0, len(keys) - 1
-    while hi - lo > 1:
-        mid = (lo + hi) // 2
-        if keys[mid] <= t:
-            lo = mid
-        else:
-            hi = mid
+    lo = bisect.bisect_right(keys, t) - 1
+    hi = lo + 1
     if t == keys[lo]:
         return euler_xyz([c[1][lo] for c in curves])
     q0 = quat(euler_xyz([c[1][lo] for c in curves]))

@@ -101,10 +101,23 @@ local ok, err = pcall(function()
 	check(ksCopy.Parent ~= created[2].AnimSaves.Value and ksCopy.Parent:IsA("ObjectValue") and ksCopy.Parent.Value == copy,
 		"duplicated avatar saved into the original's slot")
 	-- download errors seen by the student
-	local gone = studentError(Motive.httpGetJson, Motive.BASE_URL .. "non-esiste-davvero.json")
+	local gone = studentError(Motive.httpGetJson, Motive.BASE_URL .. "non-esiste-davvero.json", "sparita: Aggiorna elenco")
 	check(gone ~= nil and gone:find("Aggiorna elenco") ~= nil, "missing take (404) message: " .. tostring(gone))
-	local offline = studentError(Motive.httpGetJson, "https://motive-roblox-test.invalid/index.json")
+	local offline = studentError(Motive.httpGetJson, "https://motive-roblox-test.invalid/index.json", "x")
 	check(offline ~= nil and offline:find("connessione") ~= nil, "no network message: " .. tostring(offline))
+	-- a joint hanging on a part that is not R15 (custom rig): clear message, no Lua error
+	local odd = created[2]:Clone()
+	table.insert(created, odd)
+	odd.Name = "MotiveTestStrano"
+	odd.Parent = workspace
+	local extra = Instance.new("Part")
+	extra.Name = "Zaino"
+	extra.Parent = odd
+	for _, d in odd:GetDescendants() do
+		if d:IsA("Motor6D") and d.Part1 and d.Part1.Name == "LeftUpperArm" then d.Part0 = extra end
+	end
+	local oddMsg = studentError(Motive.buildTake, odd, gw)
+	check(oddMsg ~= nil and oddMsg:find("non standard") ~= nil, "joint on an extra part: " .. tostring(oddMsg))
 	local orphan = Motive.buildTake(created[1], gw)
 	created[1].Parent = nil
 	check(studentError(Motive.saveTake, created[1], orphan, "x") ~= nil, "removed avatar not reported")

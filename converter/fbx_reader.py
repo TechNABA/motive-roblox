@@ -117,6 +117,9 @@ def load(path):
                 unsupported = "l'osso %s ha Pre/PostRotation, non supportate" % name
             if any(abs(x - 1) > 1e-4 for x in p.get("Lcl Scaling", [1, 1, 1])):
                 unsupported = "l'osso %s e' scalato, non supportato" % name
+            for prop in ("RotationOffset", "RotationPivot", "ScalingOffset", "ScalingPivot"):
+                if any(abs(x) > 1e-6 for x in p.get(prop, [0, 0, 0])):
+                    unsupported = "l'osso %s ha %s, non supportato" % (name, prop)
             models[n[1][0]] = {"name": name, "kind": n[1][2] if len(n[1]) > 2 else "", "unsupported": unsupported,
                                "T": list(p.get("Lcl Translation", [0, 0, 0])),
                                "R": list(p.get("Lcl Rotation", [0, 0, 0])), "curves": {}}

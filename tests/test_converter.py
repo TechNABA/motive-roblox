@@ -85,6 +85,10 @@ class MathTests(unittest.TestCase):
         self.assertLess(max(abs(a - b) for a, b in zip(mv(r, [0, -1, 0]), [0, 1, 0])), 1e-9)
         self.assertLess(max(abs(a - b) for a, b in zip(mm(r, mt(r)), [1, 0, 0, 0, 1, 0, 0, 0, 1])), 1e-9)
 
+    def test_unknown_option_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(cli.main(["--sul_posto", "--out=" + os.path.join(d, "out"), d]), 2)
+
     def test_index_ignores_foreign_json_and_leftovers(self):
         with tempfile.TemporaryDirectory() as d:
             src, out = os.path.join(d, "in"), os.path.join(d, "out")
@@ -259,6 +263,26 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(json.load(f)["takes"], [])
             with open(os.path.join(out, "tolte.json"), encoding="utf-8") as f:
                 self.assertEqual(json.load(f)["takes"], ["Brutta.json"])
+
+    def test_take_lost_without_removal_is_converted_again(self):
+        """After 'git reset --hard' an unpublished take file is gone but the local record still lists its FBX."""
+        with tempfile.TemporaryDirectory() as d:
+            motive, out = os.path.join(d, "export"), os.path.join(d, "repo", "animazioni")
+            os.makedirs(motive)
+            shutil.copy(SAMPLE, os.path.join(motive, "Persa.fbx"))
+            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
+            os.remove(os.path.join(out, "Persa.json"))  # gone, and not listed in the index either
+            os.remove(os.path.join(out, "index.json"))
+            self.assertEqual(cli.main(["--out=" + out, motive]), 0)
+            self.assertTrue(os.path.exists(os.path.join(out, "Persa.json")))
+
+    def test_rotation_pivot_is_refused(self):
+        broken = copy.deepcopy(self.skel)
+        hips = broken.by_name["Hips"]
+        broken.models[hips]["unsupported"] = "l'osso Hips ha RotationPivot, non supportato"
+        with self.assertRaises(FbxError) as e:
+            convert(broken, "x")
+        self.assertIn("RotationPivot", str(e.exception))
 
 
 if __name__ == "__main__":

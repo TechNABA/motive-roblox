@@ -45,8 +45,10 @@ if errorlevel 1 (
 rem takes removed by hand are recorded first, so the rebase cannot lose them in the autostash
 call :registra
 if errorlevel 1 goto noidentity
-rem index.json is rebuilt by the converter: on a conflict keep either side (.gitattributes: merge=ours)
+rem index.json and tolte.json are recomputed by the converter: on a conflict keep either side
+rem (.gitattributes: merge=ours); a removal lost this way is found again from index.json
 git config merge.ours.driver true
+for /f %%s in ('git stash list ^| find /c /v ""') do set STASH_PRIMA=%%s
 git rebase --quiet --autostash origin/master >nul 2>&1
 set REBASE=%errorlevel%
 for /f %%u in ('git diff --name-only --diff-filter=U ^| find /c /v ""') do set UNMERGED=%%u
@@ -59,6 +61,11 @@ if not "%REBASE%"=="0" (
     echo     git reset --hard origin/master
     echo poi trascina di nuovo gli FBX da ripubblicare.
     goto fine
+)
+for /f %%s in ('git stash list ^| find /c /v ""') do set STASH_DOPO=%%s
+if not "%STASH_DOPO%"=="%STASH_PRIMA%" (
+    echo ATTENZIONE: alcune modifiche fatte a mano in questa cartella erano in conflitto con GitHub e sono
+    echo state messe da parte ^(git stash list^). Le take vengono comunque convertite e pubblicate.
 )
 
 echo.

@@ -82,6 +82,14 @@ local function describeRig(rig: Model)
 		end
 		return inst
 	end
+	-- every R15 joint must hang on the root or on another R15 part (directly or through bones)
+	for _, p in PARTS do
+		local o = owner(joints[p].container)
+		if not (o and o.Parent == rig and (o == hrp or table.find(PARTS, o.Name))) then
+			fail("L'avatar '" .. rig.Name .. "' ha articolazioni non standard (" .. p .. " e' attaccata a "
+				.. (o and o.Name or "niente") .. "). Usa un avatar creato da Avatar > Character.")
+		end
+	end
 	-- rest CFrames relative to HumanoidRootPart, computed from the joints (independent of the current pose)
 	local rest, visiting = {}, {}
 	local function restCF(inst: Instance): CFrame
@@ -309,9 +317,11 @@ local function pickRig(): Model
 	return rigs[1]
 end
 
-local function httpGetJson(url: string)
+-- Download and decode a JSON file. missingMessage is shown when the file is not on GitHub (HTTP 404).
+local function httpGetJson(url: string, missingMessage: string)
 	local ok, res = pcall(function()
-		return HttpService:GetAsync(url .. "?v=" .. tostring(os.time()), true)
+		return HttpService:RequestAsync({ Url = url .. "?v=" .. tostring(os.time()), Method = "GET",
+			Headers = { ["Cache-Control"] = "no-cache" } })
 	end)
 	if not ok then
 		local msg = tostring(res)
@@ -319,12 +329,15 @@ local function httpGetJson(url: string)
 		if low:find("permission") or low:find("not allowed") or low:find("denied") then
 			fail("Studio non lascia scaricare le animazioni.\nVai in Plugins > Manage Plugins, apri 'Animazioni Motive' e consenti l'accesso a raw.githubusercontent.com.")
 		end
-		if low:find("404") then
-			fail("Questa animazione non c'e' piu': clicca Aggiorna elenco.")
-		end
 		fail("Non riesco a scaricare le animazioni: controlla la connessione a internet e riprova.\n(" .. msg .. ")")
 	end
-	local okJson, data = pcall(function() return HttpService:JSONDecode(res) end)
+	if res.StatusCode == 404 then
+		fail(missingMessage)
+	end
+	if not res.Success then
+		fail("Il server ha risposto con un errore (" .. tostring(res.StatusCode) .. "): riprova tra qualche minuto.")
+	end
+	local okJson, data = pcall(function() return HttpService:JSONDecode(res.Body) end)
 	if not okJson then
 		fail("Il server ha risposto in modo strano: riprova tra qualche minuto.")
 	end
@@ -473,7 +486,8 @@ local function useTake(entry)
 		end
 		local rig = pickRig()
 		say("Scarico '" .. entry.name .. "'...")
-		local data = cache[entry.file] or httpGetJson(BASE_URL .. HttpService:UrlEncode(entry.file))
+		local data = cache[entry.file] or httpGetJson(BASE_URL .. HttpService:UrlEncode(entry.file),
+			"Questa animazione non c'e' piu': clicca Aggiorna elenco.")
 		local ks = buildTake(rig, data, function(p)
 			say(string.format("Adatto '%s' all'avatar... %d%%", entry.name, math.floor(p * 100)))
 		end)
@@ -495,7 +509,7 @@ local function loadList()
 	run(function()
 		say("Carico l'elenco delle animazioni...")
 		table.clear(cache) -- a take republished under the same name must be downloaded again
-		local index = httpGetJson(BASE_URL .. "index.json")
+		local index = httpGetJson(BASE_URL .. "index.json", "L'elenco delle animazioni non si trova: avvisa il docente.")
 		if type(index) ~= "table" or type(index.takes) ~= "table" then
 			fail("L'elenco delle animazioni e' danneggiato: avvisa il docente.")
 		end

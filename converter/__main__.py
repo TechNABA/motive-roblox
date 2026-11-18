@@ -123,7 +123,14 @@ def collect_inputs(inputs):
     return found, missing
 
 
+KNOWN_OPTIONS = ("--out=", "--sul-posto")
+
+
 def main(argv):
+    unknown = [a for a in argv if a.startswith("--") and not a.startswith(KNOWN_OPTIONS)]
+    if unknown:
+        print("ERRORE: opzione sconosciuta %s (valide: --out=CARTELLA, --sul-posto)" % ", ".join(unknown))
+        return 2
     opts = dict(a[2:].split("=", 1) for a in argv if a.startswith("--") and "=" in a)
     travel = "--sul-posto" not in argv
     inputs = [a for a in argv if not a.startswith("--")] or ["export_motive"]
@@ -148,7 +155,8 @@ def main(argv):
         out_name = safe_name(stem) + ".json"
         try:
             key = file_key(src)
-            if key in record["files"]:
+            done_as = record["files"].get(key)
+            if done_as and os.path.exists(os.path.join(out_dir, done_as)):
                 skipped += 1
                 continue
             if out_name in removed:
