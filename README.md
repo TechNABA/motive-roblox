@@ -4,7 +4,7 @@ Porta le animazioni registrate con **OptiTrack Motive** dentro **Roblox Studio**
 guardare e modificare nell'Animation Editor.
 
 - **Docente**: trascina gli export di Motive su `Converti.bat` e manda agli studenti il pacchetto `.zip` che ne esce.
-- **Studenti**: installano una volta il plugin e aprono il pacchetto dentro Studio. Guida: [GUIDA-STUDENTI.md](GUIDA-STUDENTI.md).
+- **Studenti**: installano una volta il plugin e aprono il pacchetto dentro Studio. Guida: [GUIDA-STUDENTI.md](GUIDA-STUDENTI.md) (in inglese: [STUDENT-GUIDE.md](STUDENT-GUIDE.md)).
 
 ## Come funziona
 

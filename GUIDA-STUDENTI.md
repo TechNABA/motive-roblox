@@ -1,5 +1,7 @@
 # Animazioni Motive in Roblox Studio
 
+English: [STUDENT-GUIDE.md](STUDENT-GUIDE.md)
+
 ## 1. Installa il plugin (una volta sola)
 
 Apri questo link e clicca **Get** (o **Ottieni**), poi **Install**:
@@ -7,6 +9,20 @@ Apri questo link e clicca **Get** (o **Ottieni**), poi **Install**:
 (sul Creator Store il plugin si chiama **Motive Animation Converter**)
 
 Poi apri Roblox Studio: a destra compare il pannello **Animazioni Motive**.
+
+### Senza lo store
+
+Se il link non funziona o non puoi usare il Creator Store:
+
+1. Scarica il file del plugin: <https://github.com/TechNABA/motive-roblox/releases/latest/download/MotiveAnimazioni.rbxmx>
+2. In Studio: **File > New > Baseplate**.
+3. Trascina `MotiveAnimazioni.rbxmx` dentro la finestra di Studio: nell'**Explorer** compare lo script
+   **AnimazioniMotive**.
+4. Click destro sullo script > **Save as Local Plugin...** e conferma senza cambiare nome o cartella.
+5. Cancella lo script dalla scena (selezionalo e premi **Canc**). Il pannello **Animazioni Motive** resta.
+
+Installato cosi', il plugin non si aggiorna da solo: se il docente ti dice che c'e' una versione nuova, rifai questi
+passi.
 
 ## 2. Usa le animazioni
 
@@ -27,12 +43,6 @@ Leggi il messaggio nel pannello: dice cosa fare. I casi piu' comuni:
 - **"Nella scena non c'e' nessun avatar"**: fai il punto 3.
 - **"Ci sono ... avatar"**: seleziona quelli da animare, poi clicca di nuovo l'animazione.
 - **"c'era gia'"**: quell'avatar ha gia' l'animazione: aprila dall'Animation Editor.
-- **Su Mac non trovi il .zip ma una cartella**: e' normale (Safari l'ha estratto). Clicca **Apri pacchetto...**, entra
-  nella cartella, seleziona tutti i file (**Cmd+A**) e conferma.
+- **Al posto del .zip hai una cartella** (l'hai estratto tu, o su Mac l'ha fatto Safari da solo): va bene lo stesso.
+  Clicca **Apri pacchetto...**, entra nella cartella, seleziona tutti i file (**Ctrl+A**, su Mac **Cmd+A**) e conferma.
 - **Hai chiuso Studio**: riapri il pacchetto con **Apri pacchetto...**.
-
----
-
-**Senza link del plugin?** Scarica `MotiveAnimazioni.rbxmx` da
-<https://github.com/TechNABA/motive-roblox/releases/latest>, trascinalo dentro Studio, click destro sullo script
-**AnimazioniMotive** > **Save as Local Plugin**, poi cancella lo script dalla scena.
