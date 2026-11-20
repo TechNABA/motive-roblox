@@ -60,18 +60,13 @@ pacchetto.
 Il file del plugin per Studio e' nella [release](https://github.com/TechNABA/motive-roblox/releases/latest):
 `MotiveAnimazioni.rbxmx`.
 
-**Pubblicarlo sul Creator Store (consigliato, una volta sola, dall'account Roblox del docente):**
+Ogni studente trascina `MotiveAnimazioni.rbxmx` in Studio, click destro sullo script > **Save as Local Plugin**, poi
+cancella lo script dalla scena (istruzioni nella guida studenti, `GUIDA-STUDENTI.md` e `STUDENT-GUIDE.md`).
 
-1. Apri Studio, trascina `MotiveAnimazioni.rbxmx` nella finestra: compare lo script `AnimazioniMotive`.
-2. Click destro sullo script > **Publish as Plugin**. Nome "Animazioni Motive", distribuzione pubblica e gratuita.
-3. Nelle impostazioni dell'asset (Creator Dashboard) attiva la distribuzione gratuita sul Creator Store e copia il link
-   della pagina del plugin nella guida studenti (`GUIDA-STUDENTI.md`, punto 1). Pubblicato: [Motive Animation
-   Converter](https://create.roblox.com/store/asset/91142360787208/Motive-Animation-Converter).
-
-Da quel momento gli studenti lo installano con un clic e Studio lo aggiorna da solo quando ripubblichi.
-
-**Senza Creator Store**: ogni studente trascina `MotiveAnimazioni.rbxmx` in Studio, click destro sullo script >
-**Save as Local Plugin**, poi cancella lo script dalla scena (istruzioni nella guida studenti).
+**Creator Store**: il plugin e' caricato dall'account TechNABA (asset 91142360787208), ma il 2026-11-20 la moderazione
+non l'ha distribuito ("potrebbe violare le Norme comunitarie", senza motivo). Finche' non e' pubblicato, gli studenti lo
+installano dal file della release. Quando lo store lo distribuisce, il link della pagina va al punto 1 delle guide
+studenti: da li' lo installano con un clic e Studio lo aggiorna da solo quando ripubblichi.
 
 Cosa fa il pannello: **Apri pacchetto...** accetta il `.zip` (anche se ricompresso da Windows o macOS) e, in
 alternativa, i file `.json` delle take (Safari su Mac a volte estrae lo zip da solo). Con piu' avatar selezionati la
