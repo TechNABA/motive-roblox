@@ -5,16 +5,6 @@ brackets.
 
 ## 1. Install the plugin (once)
 
-Open this link and click **Get**, then **Install**:
-<https://create.roblox.com/store/asset/91142360787208/Motive-Animation-Converter>
-(on the Creator Store the plugin is called **Motive Animation Converter**)
-
-Then open Roblox Studio: the **Animazioni Motive** panel appears on the right.
-
-### Without the store
-
-If the link doesn't work or you can't use the Creator Store:
-
 1. Download the plugin file: <https://github.com/TechNABA/motive-roblox/releases/latest/download/MotiveAnimazioni.rbxmx>
 2. In Studio: **File > New > Baseplate**.
 3. Drag `MotiveAnimazioni.rbxmx` into the Studio window: the **AnimazioniMotive** script appears in the **Explorer**.

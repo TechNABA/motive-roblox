@@ -4,16 +4,6 @@ English: [STUDENT-GUIDE.md](STUDENT-GUIDE.md)
 
 ## 1. Installa il plugin (una volta sola)
 
-Apri questo link e clicca **Get** (o **Ottieni**), poi **Install**:
-<https://create.roblox.com/store/asset/91142360787208/Motive-Animation-Converter>
-(sul Creator Store il plugin si chiama **Motive Animation Converter**)
-
-Poi apri Roblox Studio: a destra compare il pannello **Animazioni Motive**.
-
-### Senza lo store
-
-Se il link non funziona o non puoi usare il Creator Store:
-
 1. Scarica il file del plugin: <https://github.com/TechNABA/motive-roblox/releases/latest/download/MotiveAnimazioni.rbxmx>
 2. In Studio: **File > New > Baseplate**.
 3. Trascina `MotiveAnimazioni.rbxmx` dentro la finestra di Studio: nell'**Explorer** compare lo script
