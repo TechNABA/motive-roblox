@@ -11,7 +11,7 @@ English: [STUDENT-GUIDE.md](STUDENT-GUIDE.md)
 4. Click destro sullo script > **Save as Local Plugin...** e conferma senza cambiare nome o cartella.
 5. Cancella lo script dalla scena (selezionalo e premi **Canc**). Il pannello **Animazioni Motive** resta.
 
-Installato cosi', il plugin non si aggiorna da solo: se il docente ti dice che c'e' una versione nuova, rifai questi
+Il plugin non si aggiorna da solo: se il docente ti dice che c'e' una versione nuova, rifai questi
 passi.
 
 ## 2. Usa le animazioni

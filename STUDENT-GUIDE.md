@@ -11,12 +11,12 @@ brackets.
 4. Right-click the script > **Save as Local Plugin...** and confirm without changing the name or folder.
 5. Delete the script from the scene (select it and press **Delete**). The **Animazioni Motive** panel stays.
 
-Installed this way, the plugin doesn't update itself: if your teacher tells you there is a new version, repeat these
+The plugin doesn't update itself: if your teacher tells you there is a new version, repeat these
 steps.
 
 ## 2. Use the animations
 
-1. Save the `.zip` package your teacher sent you on your computer. **You don't need to extract it.**
+1. Save the `.zip` package your teacher sent you to your computer. **You don't need to extract it.**
 2. In Studio: **File > New > Baseplate**.
 3. **Avatar > Character** tab: create your avatar.
 4. In the **Animazioni Motive** panel click **Apri pacchetto...** (Open package) and choose the `.zip` file.
